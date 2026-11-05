@@ -7,6 +7,9 @@
           <mappings>
             <mapping deploy="/home/guisazevedo/Projects/01_accamargo/phd_streamembed" local="$PROJECT_DIR$" web="/" />
           </mappings>
+          <excludedPaths>
+            <excludedPath local="true" path="$PROJECT_DIR$/data" />
+          </excludedPaths>
         </serverdata>
       </paths>
     </serverData>
