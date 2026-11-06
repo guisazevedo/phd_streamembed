@@ -1,7 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="Always" serverName="workstation" exclude=".svn;.cvs;.idea;.DS_Store;.git;.hg;*.hprof;*.pyc, .venv" remoteFilesAllowedToDisappearOnAutoupload="false" autoUploadExternalChanges="true">
+  <component name="PublishConfigData" autoUpload="Always" serverName="guisazevedo@workstation:22 password" exclude=".svn;.cvs;.idea;.DS_Store;.git;.hg;*.hprof;*.pyc, .venv" confirmBeforeUploading="false" confirmBeforeDeletion="false" autoUploadExternalChanges="true">
+    <option name="confirmBeforeDeletion" value="false" />
+    <option name="confirmBeforeUploading" value="false" />
     <serverData>
+      <paths name="guisazevedo@workstation:22 password">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/guisazevedo/Projects/01_accamargo/phd_streamembed" local="$PROJECT_DIR$" />
+          </mappings>
+          <excludedPaths>
+            <excludedPath local="true" path="$PROJECT_DIR$/data" />
+          </excludedPaths>
+        </serverdata>
+      </paths>
       <paths name="workstation">
         <serverdata>
           <mappings>

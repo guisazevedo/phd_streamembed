@@ -5,7 +5,7 @@
       <excludeFolder url="file://$MODULE_DIR$/.venv" />
       <excludeFolder url="file://$MODULE_DIR$/models" />
     </content>
-    <orderEntry type="jdk" jdkName="SSH (sftp://guisazevedo@workstation:22/home/guisazevedo/.virtualenvs/phd_streamembed/bin/python)" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="SSH (sftp://guisazevedo@workstation:22/home/guisazevedo/Projects/01_accamargo/phd_streamembed/.venv/bin/python)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
 </module>

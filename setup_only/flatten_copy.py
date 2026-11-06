@@ -12,7 +12,7 @@ from pathlib import Path
 
 # ---------------------------------------------------------------- CONFIG ----
 SOURCE = Path("/home/guisazevedo/Documents/00_arbeit/sa/data/bracs_wsi/BRACS_WSI")  # root folder to scan (recursively)
-DEST = Path("./data")  # single folder to put all files in
+DEST = Path("../data")  # single folder to put all files in
 EXTENSIONS = [".svs"]  # e.g. [".jpg", ".pdf"]; empty list = copy all files
 # -----------------------------------------------------------------------------
 

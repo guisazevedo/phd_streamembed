@@ -15,9 +15,9 @@ import sys
 from pathlib import Path
 
 # ---------------------------------------------------------------- CONFIG ----
-SOURCE = Path("./data")
+SOURCE = Path("../data")
 REMOTE_HOST = "guisazevedo@workstation"  # ssh target, or a Host alias from ~/.ssh/config
-REMOTE_DEST = "/home/guisazevedo/Projects/01_accamargo/phd_streamembed/data"  # outside the PyCharm project folder
+REMOTE_DEST = "/mnt/Data/bracs/data"  # outside the PyCharm project folder
 EXTENSIONS = [".svs"]  # empty list = send all files
 SSH_PORT = None  # e.g. 2222; None = default
 # -----------------------------------------------------------------------------
