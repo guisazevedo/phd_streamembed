@@ -109,7 +109,7 @@ def plot_cluster_quality(
     ks = np.array(k_values)
     with plt.rc_context(STYLE):
         fig = plt.figure(figsize=(14, 13), layout="constrained")
-        fig.suptitle(f"Choosing k · {model_name} · {N:,} tiles from {len(names)} slides", fontsize=14, weight="bold", x=0.01, ha="left")
+        fig.suptitle(f"Choosing k · {model_name} · {N:,} tiles from {len(names)} slides", fontsize=16, weight="bold", x=0.01, ha="left")
         rows = fig.subfigures(2, 1)
 
         def line(ax, values, label, best=None):
@@ -118,7 +118,7 @@ def plot_cluster_quality(
             ax.plot(ks, mean, color=SERIES[0], lw=2, marker="o", ms=5)
             if best is not None:
                 ax.axvline(ks[best], color=INK_2, ls="--", lw=1.2)
-                ax.text(ks[best], ax.get_ylim()[1], f" k={ks[best]}", color=INK_2, va="top", fontsize=8)
+                ax.text(ks[best], ax.get_ylim()[1], f" k={ks[best]}", color=INK_2, va="top", fontsize=10)
             ax.set_xlabel("number of clusters k"); ax.set_ylabel(label)
             ax.xaxis.set_major_locator(plt.MaxNLocator(integer=True))
 

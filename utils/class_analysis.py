@@ -9,7 +9,7 @@ import torch
 from utils.class_weights import compute_class_weights
 from utils.cls_data import (adjusted_rand_index, assign, contingency, fit_pca, kmeans, load_cls_features,
                             normalized_mutual_info, silhouette)
-from utils.cls_overview import GRID, INK_2, SEQ, SERIES, STYLE, SURFACE, cluster_colors
+from utils.cls_overview import GRID, INK_2, SEQ, STYLE, SURFACE, cluster_colors
 from utils.figure_captions import split_with_notes
 from utils.labels import BRACS_CLASSES, load_bracs_labels
 
@@ -106,7 +106,9 @@ def plot_class_analysis(
     Slide-level: a linear probe (class-balanced logistic regression on the mean CLS vector of each slide)
     evaluated with patient-grouped cross-validation, compared with three baselines: chance, always predicting
     the biggest class, and the same pipeline with shuffled labels. The probe is also evaluated on the
-    official Training -> Testing split of the dataset.
+    official Training -> Testing split of the dataset. The probe results are printed and returned, but not
+    plotted: the figure has four panels (classes in the embedding, class balance, classes against clusters,
+    silhouette per class).
 
     * Arguments:
     features_dir: The folder that holds one subfolder per model
@@ -124,7 +126,7 @@ def plot_class_analysis(
     show: Whether to call plt.show() (the figure is returned either way)
 
     Returns a dict with the figure, classes, the tile-level tables, the slide-level confusion matrix and the
-    probe metrics.
+    probe metrics (not plotted).
     """
 
     # STEP 1: Load the embeddings and attach the labels; slides without a known label are dropped
@@ -203,7 +205,7 @@ def plot_class_analysis(
     # STEP 7: Figure (styled with rc_context so the global matplotlib settings are left alone)
     notes_a = [
         (0, 1, "Tiles in the plane of the first two principal components, coloured by the class label of their slide (random subset of up to 10,000 tiles).\n"
-               "If the classes occupy different regions, the embedding separates them without supervision. Strong mixing is expected: most slides contain several tissue types and each tile inherits the slide label, so the labels are weak at tile level. Class separation is therefore assessed at slide level (probe below). Two components represent only part of the variance, so overlap here does not exclude separability in other directions."),
+               "If the classes occupy different regions, the embedding separates them without supervision. Strong mixing is expected: most slides contain several tissue types and each tile inherits the slide label, so the labels are weak at tile level. Class separation is therefore assessed at slide level (linear probe, reported in the text output). Two components represent only part of the variance, so overlap here does not exclude separability in other directions."),
         (1, 2, "Number of slides (bars) and tiles (text) per class.\n"
                "Strong class imbalance makes accuracy dominated by the large classes, so balanced accuracy (mean per-class recall) and per-class results are reported. Classes with few slides give noisy estimates, which appear as wide confidence intervals."),
     ]
@@ -213,18 +215,11 @@ def plot_class_analysis(
         (1, 2, "Mean silhouette coefficient of the tiles of each class, with the class label as grouping (class-balanced sample, PCA space). Positive values mean that tiles are closer to their own class than to other classes, values near 0 that classes overlap, and negative values that tiles resemble another class more than their own.\n"
                "Values near 0 are expected with weak tile labels and do not by themselves show that the features are uninformative; the slide-level probe is the more relevant test. The classes with the lowest values are the most likely to be confused, as would be expected for neighbouring grades."),
     ]
-    notes_c = [
-        (0, 1, f"Confusion matrix of a linear probe (class-balanced logistic regression on the mean CLS embedding of each slide) under {n_folds}-fold cross-validation in which all slides of a patient fall in the same fold; each row sums to 100% of the true class.\n"
-               f"A dominant diagonal indicates that the embedding separates the classes. Off-diagonal mass next to the diagonal corresponds to confusion between adjacent grades, which is clinically plausible given the known inter-observer variability. Mass far from the diagonal, for example benign slides predicted as invasive carcinoma, are failures that should be examined slide by slide."),
-        (1, 2, f"Balanced accuracy of the probe (error bar, 95% bootstrap interval over slides, {n_boot:,} resamples) compared with chance (1/K), the same pipeline trained on shuffled labels, and the official Training to Testing split of the dataset.\n"
-               f"A probe clearly above the shuffled-label and chance levels shows that the embedding carries class information. A shuffled-label result clearly above chance would indicate leakage in the evaluation. The probe is untuned and uses mean-pooled slide vectors, so it is a lower bound for dedicated slide-level models."),
-    ]
-
     colors = cluster_colors(K)
     with plt.rc_context(STYLE):
-        fig = plt.figure(figsize=(16, 17), layout="constrained")
-        fig.suptitle(f"CLS embeddings vs classes · {model_name} · {N:,} tiles, {S} slides, {K} classes", fontsize=14, weight="bold", x=0.01, ha="left")
-        rows = fig.subfigures(3, 1, height_ratios=[5.2, 5.0, 5.9])
+        fig = plt.figure(figsize=(16, 13.5), layout="constrained")
+        fig.suptitle(f"CLS embeddings vs classes · {model_name} · {N:,} tiles, {S} slides, {K} classes", fontsize=16, weight="bold", x=0.01, ha="left")
+        rows = fig.subfigures(2, 1, height_ratios=[5.2, 5.6])
 
         # Row 1: classes in the embedding, class balance
         r1 = split_with_notes(rows[0], notes_a, [1.3, 1], 16, plot_height=3.8, note_height=1.5)
@@ -234,17 +229,17 @@ def plot_class_analysis(
             m = y_tile[sub] == c
             ax_s.scatter(Z[sub][m, 0], Z[sub][m, 1], s=6, color=colors[c], alpha=0.4, linewidths=0, label=classes[c])
         ax_s.set_xlabel("PC1"); ax_s.set_ylabel("PC2"); ax_s.set_title("Do the classes occupy different regions?")
-        ax_s.legend(frameon=False, markerscale=3, ncol=2, fontsize=8, title="slide class", title_fontsize=8)
+        ax_s.legend(frameon=False, markerscale=3, ncol=2, fontsize=10, title="slide class", title_fontsize=10)
 
         ypos = np.arange(K)
         ax_b.barh(ypos, slides_per_class, color=colors, edgecolor=SURFACE, linewidth=1.5)
         for i in range(K):
-            ax_b.text(slides_per_class[i], i, f"  {slides_per_class[i]} slides · {tiles_per_class[i]:,} tiles", va="center", fontsize=8, color=INK_2)
+            ax_b.text(slides_per_class[i], i, f"  {slides_per_class[i]} slides · {tiles_per_class[i]:,} tiles", va="center", fontsize=10, color=INK_2)
         ax_b.set_yticks(ypos); ax_b.set_yticklabels(classes); ax_b.invert_yaxis(); ax_b.grid(False)
         ax_b.set_xlim(0, slides_per_class.max() * 1.7); ax_b.set_xlabel("slides"); ax_b.set_title("How balanced are the classes?")
 
         # Row 2: classes against unsupervised clusters, silhouette per class
-        r2 = split_with_notes(rows[1], notes_b, [1.3, 1], 16, plot_height=3.6, note_height=1.4)
+        r2 = split_with_notes(rows[1], notes_b, [1.3, 1], 16, plot_height=3.6, note_height=2.0)
         ax_h, ax_sil = r2.subplots(1, 2, width_ratios=[1.3, 1])
         im = ax_h.imshow(class_to_cluster, cmap=SEQ, vmin=0, vmax=max(class_to_cluster.max(), 1), aspect="auto")
         ax_h.set_xticks(range(n_clusters)); ax_h.set_xticklabels([f"C{c + 1}" for c in range(n_clusters)])
@@ -254,36 +249,13 @@ def plot_class_analysis(
             for i in range(K):
                 for j in range(n_clusters):
                     v = class_to_cluster[i, j]
-                    ax_h.text(j, i, f"{v:.0f}", ha="center", va="center", fontsize=8, color="white" if v > 0.55 * class_to_cluster.max() else INK_2)
+                    ax_h.text(j, i, f"{v:.0f}", ha="center", va="center", fontsize=10, color="white" if v > 0.55 * class_to_cluster.max() else INK_2)
         r2.colorbar(im, ax=ax_h, shrink=0.8, label="% of the class's tiles")
 
         ax_sil.barh(ypos, sil_class, color=colors, edgecolor=SURFACE, linewidth=1.5)
         ax_sil.axvline(0, color=INK_2, lw=1)
         ax_sil.set_yticks(ypos); ax_sil.set_yticklabels(classes); ax_sil.invert_yaxis(); ax_sil.grid(False)
         ax_sil.set_xlabel("mean silhouette of the class's tiles"); ax_sil.set_title("How separate is each class?")
-
-        # Row 3: probe confusion matrix and baselines
-        r3 = split_with_notes(rows[2], notes_c, [1.3, 1], 16, plot_height=4.4, note_height=1.5)
-        ax_cm, ax_bar = r3.subplots(1, 2, width_ratios=[1.3, 1])
-        cm_pct = cm / np.maximum(cm.sum(1, keepdims=True), 1) * 100
-        im = ax_cm.imshow(cm_pct, cmap=SEQ, vmin=0, vmax=100, aspect="auto")
-        ax_cm.set_xticks(range(K)); ax_cm.set_xticklabels(classes); ax_cm.set_yticks(range(K)); ax_cm.set_yticklabels(classes); ax_cm.grid(False)
-        for i in range(K):
-            for j in range(K):
-                ax_cm.text(j, i, f"{cm_pct[i, j]:.0f}", ha="center", va="center", fontsize=8, color="white" if cm_pct[i, j] > 55 else INK_2)
-        ax_cm.set_xlabel("predicted class"); ax_cm.set_ylabel("true class")
-        ax_cm.set_title(f"What does a linear probe confuse? (slide level, {n_folds}-fold patient-grouped CV)")
-        r3.colorbar(im, ax=ax_cm, shrink=0.8, label="% of the true class")
-
-        labels_bar = ["probe\n(CV)", "shuffled\nlabels", "chance"] + (["official\nTesting"] if bal_official is not None else [])
-        values = [bal_acc, bal_shuf, 1 / K] + ([bal_official] if bal_official is not None else [])
-        cols = [SERIES[0], SERIES[1], "#8a8f98"] + ([SERIES[2]] if bal_official is not None else [])
-        ax_bar.bar(range(len(values)), values, color=cols, edgecolor=SURFACE, linewidth=1.5, width=0.65)
-        ax_bar.errorbar([0], [bal_acc], yerr=[[bal_acc - ci[0]], [ci[1] - bal_acc]], color=INK_2, capsize=5, lw=1.5)
-        for i, v in enumerate(values):
-            ax_bar.text(i, v + 0.015 + (ci[1] - bal_acc if i == 0 else 0), f"{v:.2f}", ha="center", fontsize=9, color=INK_2)
-        ax_bar.set_xticks(range(len(values))); ax_bar.set_xticklabels(labels_bar); ax_bar.set_ylim(0, 1.15); ax_bar.set_yticks([0, 0.25, 0.5, 0.75, 1.0]); ax_bar.grid(False)
-        ax_bar.set_ylabel("balanced accuracy"); ax_bar.set_title("Does the probe beat the baselines?")
 
     if show:
         plt.show()

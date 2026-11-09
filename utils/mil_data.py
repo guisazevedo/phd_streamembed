@@ -111,12 +111,15 @@ def batch_iterator(
     max_tiles: int | None = None,
     shuffle: bool = False,
     generator: torch.Generator | None = None,
+    tile_dropout: float = 0.0,
 ) -> Iterator[tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[str]]]:
     """
     Yield padded batches of bags: (x [B, N, dim] float32, mask [B, N] bool, y [B] long, slide names).
 
-    Bags longer than max_tiles are randomly subsampled (a different subset every call, which acts
-    as tile dropout); None keeps every tile. Shorter bags are padded with zeros and masked.
+    With tile_dropout > 0 a random fraction of the tiles of every bag is removed first (at least one
+    tile is kept); then bags longer than max_tiles are randomly subsampled (a different subset every
+    call, which also acts as tile dropout); None keeps every tile. Shorter bags are padded with zeros and
+    masked. Use tile_dropout only for training batches; evaluation should keep every tile.
 
     * Arguments:
     bags: The bags from load_bags
@@ -128,7 +131,11 @@ def batch_iterator(
     max_tiles: The maximum number of tiles per bag (None = all)
     shuffle: Whether to shuffle the slides each call
     generator: The seeded generator for shuffling and subsampling (use one for reproducibility)
+    tile_dropout: The fraction of the tiles of each bag removed at random before max_tiles is applied (0 = none)
     """
+
+    if not 0.0 <= tile_dropout < 1.0:
+        raise ValueError(f"tile_dropout must be in [0, 1), got {tile_dropout}")
 
     order = torch.randperm(len(slides), generator=generator).tolist() if shuffle else list(range(len(slides)))
 
@@ -137,6 +144,10 @@ def batch_iterator(
         tensors = []
         for name in names:
             x = bags[name]
+            if tile_dropout > 0:
+                keep = max(1, round(len(x) * (1 - tile_dropout)))
+                if keep < len(x):
+                    x = x[torch.randperm(len(x), generator=generator)[:keep]]
             if max_tiles is not None and len(x) > max_tiles:
                 x = x[torch.randperm(len(x), generator=generator)[:max_tiles]]
             tensors.append(x)

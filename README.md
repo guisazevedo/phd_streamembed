@@ -60,10 +60,12 @@ Load a file with `torch.load(path, weights_only=True)`.
 
 A slide is a bag of tile embeddings with one label, so classification is **multiple-instance learning**. `02_vectors_to_classifier.ipynb` trains two PyTorch models on the CLS embeddings and the 7 classes of `labels/BRACS.xlsx`:
 
-- a **baseline** that averages the tile embeddings of a slide and applies one linear layer;
-- a **gated attention MIL model** (ABMIL, Ilse et al., 2018) that learns a weight for every tile, pools the tiles with these weights and classifies the result; its attention can be drawn on the slide.
+- a **gated attention MIL model** (ABMIL, Ilse et al., 2018) that learns a weight for every tile, pools the tiles with these weights and classifies the result; its attention can be drawn on the slide;
+- **CLAM-MB** (Lu et al., 2021), which has one attention branch per class, so that every class gets its own slide vector, and adds an instance-level clustering loss on the tiles that the attention selects.
 
-Protocol: the official split is used unchanged. Training slides fit the models, Validation slides are used for every choice (loss weighting, epoch), and the Testing set is evaluated once, at the end (the training code never receives Testing labels). The loss is the class-weighted cross-entropy with weights from the Training counts. Every model is trained with several seeds; the predictions of the seeds are averaged. One `SEED` fixes every random choice, and the code picks the GPU if there is one and the CPU otherwise.
+The results of the two models are shown side by side. The models are listed in `MODELS` (section 2 of the notebook); the mean-pool linear model (`MeanPoolLinear`) is still in `utils/mil_models.py` and can be added there as a reference.
+
+Protocol: the official split is used unchanged. The official Testing set is evaluated once, at the end (the training code never receives Testing labels). The official Training and Validation slides are pooled and split into patient-grouped, class-stratified folds (`utils/mil_cv.py`); every choice (loss weighting, regularisation, coarse auxiliary loss, epoch) is made by cross-validation on them, with nested early stopping so that a held-out fold is never used for fitting or stopping, and the final models are the fold models of the selected setting. The loss is the class-weighted cross-entropy with weights from the Training counts. Every model is trained with several seeds; the predictions of the seeds are averaged. One `SEED` fixes every random choice, and the code picks the GPU if there is one and the CPU otherwise.
 
 Reported on the Testing set, with 95% patient-level bootstrap intervals: accuracy, balanced accuracy, macro and weighted F1, per-class precision, recall and F1, the confusion matrix, one-vs-rest AUROC and average precision (ROC and precision-recall curves), quadratic-weighted kappa, Matthews correlation, top-2 accuracy, log-loss, Brier score and calibration error, plus two clinical views derived from the seven class probabilities (three tiers; cancer against non-cancer) and a paired comparison of the two models. Results are shown in the notebook and not written to disk. The only file written is the best classifier (highest Validation macro-F1 over both models and seeds, never chosen on the Testing set) as `classifier/classifier_model_<date-time>.pt`, with weights, class names, feature scaler, settings and Validation result; `utils.mil_train.load_classifier` loads it.
 
@@ -255,14 +257,18 @@ flowchart TD
     end
 
     subgraph S4["4. Models"]
-        M1["mean-pool linear<br/>baseline"]
-        M2["gated attention MIL<br/>(ABMIL)"]
+        M1["gated attention MIL<br/>(ABMIL)"]
+        M2["CLAM-MB<br/>class-wise attention + instance loss"]
     end
 
-    subgraph S5["5. Training (Training + Validation)"]
-        T1["5.1 compare_weightings<br/>Validation only"]
-        T2["5.2 run_seeds<br/>N seeds, early stopping on Validation"]
-        T3["5.3 plot_training_curves"]
+    subgraph S5["5. Training (Training + Validation, cross-validated)"]
+        F0["5.0 make_cv_folds<br/>patient-grouped, stratified"]
+        T1["5.1 cv_compare<br/>loss weighting"]
+        T1b["5.2 cv_compare<br/>dropout, weight decay, tile dropout"]
+        T1c["5.3 cv_compare<br/>coarse tier loss"]
+        T2["5.4 cross_validate<br/>fold models, early stopping inside each fold"]
+        T2b["5.5 out-of-fold performance"]
+        T3["5.6 plot_training_curves"]
     end
 
     subgraph S6["6. Evaluation (Testing set, used once)"]
@@ -270,25 +276,32 @@ flowchart TD
         E2["6.2 to 6.7 confusion, ROC and PR, per class,<br/>calibration, clinical views, model comparison"]
     end
 
-    A["7. plot_attention<br/>tiles the model relies on"]
-    OUT[("classifier/<br/>classifier_model_date-time.pt<br/>(best on Validation)")]
+    A["7. plot_attention<br/>tiles each model relies on"]
+    DEC["8.2 select_best_run + plot_model_decision<br/>architecture graph and specification"]
+    OUT[("8.3 classifier/<br/>classifier_model_date-time.pt<br/>(best on early-stopping slides)")]
 
     FEAT --> D2
     LAB --> D1
     D1 --> D2
     D2 --> D3
     D2 --> D4
+    D2 --> F0
+    F0 --> T1
     D4 --> T1
+    M1 --> T1
     M1 --> T2
-    M2 --> T1
     M2 --> T2
-    T1 --> T2
+    T1 --> T1b
+    T1b --> T1c
+    T1c --> T2
+    T2 --> T2b
     T2 --> T3
     T2 --> E1
     E1 --> E2
     E1 --> A
-    E1 --> OUT
-    T2 --> OUT
+    E1 --> DEC
+    T2 --> DEC
+    DEC --> OUT
 ```
 
 - **Input:** the per-slide feature files of notebook 01 and `labels/BRACS.xlsx`.

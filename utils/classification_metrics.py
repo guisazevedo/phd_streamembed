@@ -123,16 +123,20 @@ def collapse_labels(y: np.ndarray, classes: list[str], groups: dict[str, list[st
     return np.array([lookup[i] for i in y])
 
 
-def clinical_views(y: np.ndarray, proba: np.ndarray, classes: list[str], specificity: float = 0.90) -> dict:
+def clinical_views(y: np.ndarray, proba: np.ndarray, classes: list[str], specificity: float = 0.90, threshold: float = 0.5) -> dict:
     """
     Two clinical summaries of the 7-class probabilities, with no extra training.
 
     Tiers: benign (N, PB, UDH), atypical (FEA, ADH) and malignant (DCIS, IC) by summing the probabilities
     of the classes of each tier. Cancer: probability of DCIS or IC against the rest, with AUROC, average
-    precision and the sensitivity at a given specificity.
+    precision and the sensitivity at a given specificity. A slide is also called cancer when its summed
+    probability of DCIS and IC is at least `threshold` (0.5 is the argmax of the two collapsed probabilities;
+    it is fixed in advance and not tuned), which gives a 2 x 2 confusion matrix and its rates.
 
     Returns a dict with tiers (dict: names, y, proba, summary, confusion) and cancer (dict: y, score,
-    auroc, ap, sensitivity_at_specificity, specificity_level, fpr, tpr).
+    auroc, ap, sensitivity_at_specificity, specificity_level, fpr, tpr, threshold, confusion [rows true
+    non-cancer/cancer, columns predicted], sensitivity, specificity, ppv, npv; a rate is NaN when its
+    denominator is 0).
     """
 
     # STEP 1: Three tiers
@@ -146,11 +150,19 @@ def clinical_views(y: np.ndarray, proba: np.ndarray, classes: list[str], specifi
     positive = np.isin(y, cancer_columns).astype(int)
     fpr, tpr, _ = roc_curve(positive, score)
 
+    # STEP 3: The 2 x 2 confusion matrix at the threshold and its rates
+    called = (score >= threshold).astype(int)
+    tp, fn = int(((called == 1) & (positive == 1)).sum()), int(((called == 0) & (positive == 1)).sum())
+    fp, tn = int(((called == 1) & (positive == 0)).sum()), int(((called == 0) & (positive == 0)).sum())
+    rate = lambda num, den: num / den if den else float("nan")
+
     return {
         "tiers": {"names": tier_names, "y": tier_y, "proba": tier_proba, **tiers},
         "cancer": {
             "y": positive, "score": score, "auroc": roc_auc_score(positive, score), "ap": average_precision_score(positive, score),
             "sensitivity_at_specificity": float(tpr[fpr <= 1 - specificity].max()), "specificity_level": specificity, "fpr": fpr, "tpr": tpr,
+            "threshold": threshold, "confusion": np.array([[tn, fp], [fn, tp]]),
+            "sensitivity": rate(tp, tp + fn), "specificity": rate(tn, tn + fp), "ppv": rate(tp, tp + fp), "npv": rate(tn, tn + fn),
         },
     }
 

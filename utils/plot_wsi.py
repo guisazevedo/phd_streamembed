@@ -136,7 +136,7 @@ def plot_wsi(
     # STEP 4: Top panel, the full slide for reference
     ax_full = fig.add_subplot(grid_spec[0, :])
     ax_full.imshow(overview)
-    ax_full.set_title(f"{slide_path.name} | level {dataset.level} | {level_width} x {level_height} px", fontsize=11)
+    ax_full.set_title(f"{slide_path.name} | level {dataset.level} | {level_width} x {level_height} px", fontsize=13)
     ax_full.axis("off")
 
     # STEP 5: Middle panel, the tile grid with the tiles that passed the filter
@@ -146,7 +146,7 @@ def plot_wsi(
         f"Tile grid ({dataset.tile_size} px, stride {dataset.stride}) | "
         f"{len(slide_tiles)} of {grid_total} tiles passed the filter "
         f"({100 * len(slide_tiles) / max(grid_total, 1):.0f}%) | blue: passed, orange: shown below",
-        fontsize=10,
+        fontsize=12,
     )
 
     # Grid lines are only drawn when they are far enough apart to be readable
@@ -173,7 +173,7 @@ def plot_wsi(
         for number, i in enumerate(shown):
             ax_grid.text(
                 dataset.tiles[i][1] * scale, dataset.tiles[i][2] * scale, f"#{number}",
-                color="#eb6834", fontsize=7, va="bottom", ha="left", weight="bold",
+                color="#eb6834", fontsize=9, va="bottom", ha="left", weight="bold",
             )
 
     ax_grid.set_xlim(0, overview.shape[1])
@@ -184,7 +184,7 @@ def plot_wsi(
     for number, sample in enumerate(samples):
         ax = fig.add_subplot(grid_spec[2 + number // ncols, number % ncols])
         ax.imshow(_tile_to_rgb(sample["image"]))
-        ax.set_title(f'#{number} | x={sample["x"]}, y={sample["y"]}', fontsize=9)
+        ax.set_title(f'#{number} | x={sample["x"]}, y={sample["y"]}', fontsize=11)
         ax.axis("off")
 
     if show:

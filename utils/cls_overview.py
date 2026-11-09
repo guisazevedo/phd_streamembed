@@ -23,7 +23,7 @@ STYLE = ({
     "text.color": INK, "axes.labelcolor": INK_2, "xtick.color": INK_2, "ytick.color": INK_2,
     "axes.edgecolor": GRID, "axes.spines.top": False, "axes.spines.right": False,
     "axes.grid": True, "grid.color": GRID, "grid.linewidth": 0.6, "axes.axisbelow": True,
-    "font.size": 9, "axes.titlesize": 10, "axes.titleweight": "bold", "axes.titlelocation": "left",
+    "font.size": 11, "axes.titlesize": 12, "axes.titleweight": "bold", "axes.titlelocation": "left",
 })
 
 
@@ -114,7 +114,7 @@ def plot_cls_overview(
     # STEP 7: Figure (styled with rc_context so the global matplotlib settings are left alone)
     with plt.rc_context(STYLE):
         fig = plt.figure(figsize=(17, 20), layout="constrained")
-        fig.suptitle(f"CLS embeddings · {model_name} · {N:,} tiles from {len(names)} slides", fontsize=14, weight="bold", x=0.01, ha="left")
+        fig.suptitle(f"CLS embeddings · {model_name} · {N:,} tiles from {len(names)} slides", fontsize=16, weight="bold", x=0.01, ha="left")
         rows = fig.subfigures(3, 1, height_ratios=[7.1, 6.8, 5.7])
 
         # Captions under each panel: what the result means and how to act on it
@@ -185,10 +185,10 @@ def plot_cls_overview(
         for c in range(n_clusters):
             ax_b.barh(np.arange(nb), frac[:, c], left=left, color=colors[c], edgecolor=SURFACE, linewidth=1.5, label=cluster_names[c])
             left += frac[:, c]
-        ax_b.set_yticks(np.arange(nb)); ax_b.set_yticklabels([names[k] for k in range(nb)], fontsize=7)
+        ax_b.set_yticks(np.arange(nb)); ax_b.set_yticklabels([names[k] for k in range(nb)], fontsize=9)
         ax_b.invert_yaxis(); ax_b.set_xlim(0, 1); ax_b.grid(False)
         ax_b.set_title("What is each slide made of? (cluster mix)"); ax_b.set_xlabel("share of tiles")
-        ax_b.legend(frameon=False, ncol=min(n_clusters, 6), loc="upper center", bbox_to_anchor=(0.5, -0.12), fontsize=8)
+        ax_b.legend(frameon=False, ncol=min(n_clusters, 6), loc="upper center", bbox_to_anchor=(0.5, -0.12), fontsize=10)
 
         # Row 3: slide effect and dataset size
         bottom = split_with_notes(rows[2], notes_effect, [1.4, 1], 17, plot_height=3.7, note_height=2.0)

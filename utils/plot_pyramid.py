@@ -119,7 +119,7 @@ def plot_pyramid_levels(
               "The level therefore decides which morphological features the embedding can encode, and a level has to be chosen with the diagnostic task in mind.")]
     with plt.rc_context(STYLE):
         fig = plt.figure(figsize=(3.6 * len(levels), 9.5), layout="constrained")
-        fig.suptitle(f"{slide_path.name} · pyramid levels {', '.join(map(str, levels))}", fontsize=14, weight="bold", x=0.01, ha="left")
+        fig.suptitle(f"{slide_path.name} · pyramid levels {', '.join(map(str, levels))}", fontsize=16, weight="bold", x=0.01, ha="left")
         top = split_with_notes(fig, notes, [1] * len(levels), 3.6 * len(levels), plot_height=7.0, note_height=1.8)
         axes = top.subplots(2, len(levels), height_ratios=[1, 1])
         for col, lvl in enumerate(levels):
@@ -134,11 +134,11 @@ def plot_pyramid_levels(
             ax_field.imshow(fields[lvl], interpolation="nearest")
             side_display = tile_size / max(window / d, 1) * display_px
             ax_field.add_patch(Rectangle(((display_px - side_display) / 2,) * 2, side_display, side_display, fill=False, edgecolor=SERIES[1], lw=2))
-            ax_field.set_title(f"level {lvl} · {d:.0f}× · {mpp * d:.2f} µm/px", fontsize=10)
+            ax_field.set_title(f"level {lvl} · {d:.0f}× · {mpp * d:.2f} µm/px", fontsize=12)
             ax_tile.imshow(tiles[lvl], interpolation="nearest")
-            ax_tile.set_title(f"{tile_size} px tile = {tile_size * d * mpp / 1000:.2f} mm", fontsize=9, color=INK_2)
-        axes[0, 0].set_ylabel("same field of view", fontsize=10)
-        axes[1, 0].set_ylabel("tile seen by the model", fontsize=10)
+            ax_tile.set_title(f"{tile_size} px tile = {tile_size * d * mpp / 1000:.2f} mm", fontsize=11, color=INK_2)
+        axes[0, 0].set_ylabel("same field of view", fontsize=12)
+        axes[1, 0].set_ylabel("tile seen by the model", fontsize=12)
 
     if show:
         plt.show()
@@ -184,12 +184,12 @@ def plot_class_gallery(table: pd.DataFrame, max_px: int = 700, show: bool = True
                     "intensity, and artefacts such as pen marks, folds or air bubbles. Single slides are illustrations, not evidence of class differences.")]
     with plt.rc_context(STYLE):
         fig = plt.figure(figsize=(15, 9.5), layout="constrained")
-        fig.suptitle("One slide per class (median size)", fontsize=14, weight="bold", x=0.01, ha="left")
+        fig.suptitle("One slide per class (median size)", fontsize=16, weight="bold", x=0.01, ha="left")
         top = split_with_notes(fig, notes, [1, 1, 1, 1], 15, plot_height=7.0, note_height=1.6)
         axes = top.subplots(2, 4).ravel()
         for ax, (_, row), image in zip(axes, chosen.iterrows(), images):
             ax.imshow(image); ax.set_xticks([]); ax.set_yticks([]); ax.grid(False); ax.spines[:].set_visible(False)
-            ax.set_title(f"{row['label']} · {row['slide']}\n{row['width_1'] / 1000:.0f}k × {row['height_1'] / 1000:.0f}k px · {row['gigapixels']:.1f} Gpx · {row['set']}", fontsize=8.5)
+            ax.set_title(f"{row['label']} · {row['slide']}\n{row['width_1'] / 1000:.0f}k × {row['height_1'] / 1000:.0f}k px · {row['gigapixels']:.1f} Gpx · {row['set']}", fontsize=10.5)
         for ax in axes[len(chosen):]:
             ax.axis("off")
 
@@ -257,7 +257,7 @@ def plot_tile_examples(
                               "The examples are random, not selected; they illustrate the variation and do not show diagnostic features of each class.")]
     with plt.rc_context(STYLE):
         fig = plt.figure(figsize=(2.0 * n_per_class, 1.9 * len(BRACS_CLASSES) + 2.2), layout="constrained")
-        fig.suptitle(f"Random tissue tiles per class · level {level}", fontsize=14, weight="bold", x=0.01, ha="left")
+        fig.suptitle(f"Random tissue tiles per class · level {level}", fontsize=16, weight="bold", x=0.01, ha="left")
         top = split_with_notes(fig, notes, [1] * n_per_class, 2.0 * n_per_class, plot_height=1.9 * len(BRACS_CLASSES), note_height=2.2)
         axes = top.subplots(len(BRACS_CLASSES), n_per_class)
         for r, c in enumerate(BRACS_CLASSES):
@@ -266,7 +266,7 @@ def plot_tile_examples(
                 ax.set_xticks([]); ax.set_yticks([]); ax.grid(False); ax.spines[:].set_visible(False)
                 if k < len(grid[r]):
                     ax.imshow(grid[r][k])
-            axes[r, 0].set_ylabel(c, fontsize=11, rotation=0, labelpad=18, va="center")
+            axes[r, 0].set_ylabel(c, fontsize=13, rotation=0, labelpad=18, va="center")
 
     if show:
         plt.show()

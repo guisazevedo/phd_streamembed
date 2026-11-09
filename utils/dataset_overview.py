@@ -176,7 +176,7 @@ def plot_class_distribution(table: pd.DataFrame, show: bool = True) -> dict:
     x = np.arange(len(BRACS_CLASSES))
     with plt.rc_context(STYLE):
         fig = plt.figure(figsize=(15, 6.2), layout="constrained")
-        fig.suptitle(f"Class distribution · {len(table)} slides, {table['patient'].nunique()} patients", fontsize=14, weight="bold", x=0.01, ha="left")
+        fig.suptitle(f"Class distribution · {len(table)} slides, {table['patient'].nunique()} patients", fontsize=16, weight="bold", x=0.01, ha="left")
         top = split_with_notes(fig, notes, [1, 1], 15, plot_height=3.6, note_height=1.5)
         ax_a, ax_b = top.subplots(1, 2)
 
@@ -185,7 +185,7 @@ def plot_class_distribution(table: pd.DataFrame, show: bool = True) -> dict:
             ax_a.bar(x, counts[s], bottom=bottom, color=SET_COLORS[s], edgecolor=SURFACE, linewidth=1.5, width=0.7, label=s)
             bottom += counts[s].to_numpy()
         for i, total in enumerate(bottom):
-            ax_a.text(i, total, f"{int(total)}", ha="center", va="bottom", fontsize=8, color=INK_2)
+            ax_a.text(i, total, f"{int(total)}", ha="center", va="bottom", fontsize=10, color=INK_2)
         ax_a.set_xticks(x); ax_a.set_xticklabels(BRACS_CLASSES); ax_a.set_ylabel("slides"); ax_a.set_ylim(0, bottom.max() * 1.12)
         ax_a.set_title("How many slides per class?"); ax_a.legend(frameon=False)
 
@@ -244,7 +244,7 @@ def plot_split_audit(table: pd.DataFrame, n_perm: int = 5000, seed: int = 0, sho
     ]
     with plt.rc_context(STYLE):
         fig = plt.figure(figsize=(16, 11.5), layout="constrained")
-        fig.suptitle("Audit of the official split", fontsize=14, weight="bold", x=0.01, ha="left")
+        fig.suptitle("Audit of the official split", fontsize=16, weight="bold", x=0.01, ha="left")
         rows = fig.subfigures(2, 1)
 
         top = split_with_notes(rows[0], notes[:2], [1.2, 1], 16, plot_height=3.6, note_height=2.3)
@@ -254,14 +254,14 @@ def plot_split_audit(table: pd.DataFrame, n_perm: int = 5000, seed: int = 0, sho
         ax_r.set_xticks(range(len(SETS))); ax_r.set_xticklabels(SETS); ax_r.set_yticks(range(len(BRACS_CLASSES))); ax_r.set_yticklabels(BRACS_CLASSES); ax_r.grid(False)
         for i in range(len(BRACS_CLASSES)):
             for j in range(len(SETS)):
-                ax_r.text(j, i, f"{int(observed[i, j])}", ha="center", va="center", fontsize=9, color=INK_2)
+                ax_r.text(j, i, f"{int(observed[i, j])}", ha="center", va="center", fontsize=11, color=INK_2)
         top.colorbar(im, ax=ax_r, shrink=0.8, label="standardized residual")
         ax_r.set_title("Does each set have its share of each class?")
 
         classes_per_patient = stats["classes_per_patient"].value_counts().sort_index()
         ax_c.bar(classes_per_patient.index, classes_per_patient.values, color=SERIES[0], edgecolor=SURFACE, linewidth=1.5, width=0.7)
         for k, v in classes_per_patient.items():
-            ax_c.text(k, v, f"{v}", ha="center", va="bottom", fontsize=8, color=INK_2)
+            ax_c.text(k, v, f"{v}", ha="center", va="bottom", fontsize=10, color=INK_2)
         ax_c.set_xticks(classes_per_patient.index); ax_c.set_xlabel("different classes among a patient's slides"); ax_c.set_ylabel("patients")
         ax_c.set_title("Do a patient's slides share one class?")
 
@@ -277,8 +277,8 @@ def plot_split_audit(table: pd.DataFrame, n_perm: int = 5000, seed: int = 0, sho
         x = np.arange(len(SETS))
         ax_p.bar(x - 0.2, slides_per_set, width=0.4, color=SERIES[0], edgecolor=SURFACE, linewidth=1, label="slides")
         ax_p.bar(x + 0.2, patients_per_set, width=0.4, color=SERIES[1], edgecolor=SURFACE, linewidth=1, label="patients")
-        for xi, v in zip(x - 0.2, slides_per_set): ax_p.text(xi, v, f"{v}", ha="center", va="bottom", fontsize=8, color=INK_2)
-        for xi, v in zip(x + 0.2, patients_per_set): ax_p.text(xi, v, f"{v}", ha="center", va="bottom", fontsize=8, color=INK_2)
+        for xi, v in zip(x - 0.2, slides_per_set): ax_p.text(xi, v, f"{v}", ha="center", va="bottom", fontsize=10, color=INK_2)
+        for xi, v in zip(x + 0.2, patients_per_set): ax_p.text(xi, v, f"{v}", ha="center", va="bottom", fontsize=10, color=INK_2)
         ax_p.set_xticks(x); ax_p.set_xticklabels(SETS); ax_p.set_ylabel("count"); ax_p.legend(frameon=False)
         ax_p.set_title("How large is each set?")
 
@@ -326,7 +326,7 @@ def plot_roi_composition(table: pd.DataFrame, labels_file: str | Path, show: boo
     colors = cluster_colors(len(BRACS_CLASSES))
     with plt.rc_context(STYLE):
         fig = plt.figure(figsize=(15, 7), layout="constrained")
-        fig.suptitle(f"Composition of the slide labels · {len(slides)} slides with RoI breakdown", fontsize=14, weight="bold", x=0.01, ha="left")
+        fig.suptitle(f"Composition of the slide labels · {len(slides)} slides with RoI breakdown", fontsize=16, weight="bold", x=0.01, ha="left")
         top = split_with_notes(fig, notes, [1.2, 1], 15, plot_height=4.0, note_height=2.4)
         ax_h, ax_b = top.subplots(1, 2, width_ratios=[1.2, 1])
 
@@ -337,7 +337,7 @@ def plot_roi_composition(table: pd.DataFrame, labels_file: str | Path, show: boo
         for i in range(len(BRACS_CLASSES)):
             for j in range(len(BRACS_CLASSES)):
                 v = mean_share.iloc[i, j]
-                ax_h.text(j, i, f"{v:.0f}", ha="center", va="center", fontsize=8, color="white" if v > 55 else INK_2)
+                ax_h.text(j, i, f"{v:.0f}", ha="center", va="center", fontsize=10, color="white" if v > 55 else INK_2)
         top.colorbar(im, ax=ax_h, shrink=0.8, label="% of the RoIs")
         ax_h.set_xlabel("class of the RoI"); ax_h.set_ylabel("class of the slide"); ax_h.set_title("What do slides of each class contain?")
 
@@ -414,7 +414,7 @@ def plot_slide_properties(table: pd.DataFrame, tile_size: int = 224, show: bool 
     colors = cluster_colors(len(BRACS_CLASSES))
     with plt.rc_context(STYLE):
         fig = plt.figure(figsize=(15, 16.5), layout="constrained")
-        fig.suptitle(f"Technical properties of the {len(table)} slides", fontsize=14, weight="bold", x=0.01, ha="left")
+        fig.suptitle(f"Technical properties of the {len(table)} slides", fontsize=16, weight="bold", x=0.01, ha="left")
         rows = fig.subfigures(3, 1)
         rng = np.random.default_rng(0)
 
@@ -438,7 +438,7 @@ def plot_slide_properties(table: pd.DataFrame, tile_size: int = 224, show: bool 
                 labels_b.append(f"L{lvl}\n{factor}×"); counts_b.append(n); colors_b.append(SERIES[k])
         ax_b.bar(range(len(counts_b)), counts_b, color=colors_b, edgecolor=SURFACE, linewidth=1.5, width=0.7)
         for i, v in enumerate(counts_b):
-            ax_b.text(i, v, f"{v}", ha="center", va="bottom", fontsize=8, color=INK_2)
+            ax_b.text(i, v, f"{v}", ha="center", va="bottom", fontsize=10, color=INK_2)
         ax_b.set_xticks(range(len(counts_b))); ax_b.set_xticklabels(labels_b); ax_b.set_ylabel("slides"); ax_b.set_title("How are the pyramid levels downsampled?")
 
         # Row 2: MPP and scan year (batch screen)
@@ -451,7 +451,7 @@ def plot_slide_properties(table: pd.DataFrame, tile_size: int = 224, show: bool 
             ax_m.bar(range(len(mpp_values)), counts_m, bottom=bottom_m, color=SET_COLORS[s], edgecolor=SURFACE, linewidth=1.5, width=0.6, label=s)
             bottom_m += counts_m
         for i, v in enumerate(bottom_m):
-            ax_m.text(i, v, f"{int(v)}", ha="center", va="bottom", fontsize=8, color=INK_2)
+            ax_m.text(i, v, f"{int(v)}", ha="center", va="bottom", fontsize=10, color=INK_2)
         ax_m.set_xticks(range(len(mpp_values))); ax_m.set_xticklabels([f"{m:g}" for m in mpp_values]); ax_m.set_xlabel("MPP (µm per pixel, level 1)")
         ax_m.set_ylabel("slides"); ax_m.set_title("Is the resolution the same in every slide?"); ax_m.legend(frameon=False)
 
@@ -461,7 +461,7 @@ def plot_slide_properties(table: pd.DataFrame, tile_size: int = 224, show: bool 
             ax_y.bar(range(len(years)), set_by_year.loc[s], bottom=bottom_y, color=SET_COLORS[s], edgecolor=SURFACE, linewidth=1.5, width=0.6, label=s)
             bottom_y += set_by_year.loc[s].to_numpy()
         for i, v in enumerate(bottom_y):
-            ax_y.text(i, v, f"{int(v)}", ha="center", va="bottom", fontsize=8, color=INK_2)
+            ax_y.text(i, v, f"{int(v)}", ha="center", va="bottom", fontsize=10, color=INK_2)
         ax_y.set_xticks(range(len(years))); ax_y.set_xticklabels([str(int(y)) for y in years]); ax_y.set_xlabel("year of scanning")
         ax_y.set_ylabel("slides"); ax_y.set_title("When were the slides scanned?"); ax_y.legend(frameon=False)
 
@@ -475,7 +475,7 @@ def plot_slide_properties(table: pd.DataFrame, tile_size: int = 224, show: bool 
             patch.set_facecolor(SERIES[0]); patch.set_alpha(0.35); patch.set_edgecolor(INK_2)
         for i, values in enumerate(tiles):
             ax_t.scatter(i + rng.uniform(-0.18, 0.18, len(values)), values, s=5, color=SERIES[0], alpha=0.5, linewidths=0)
-            ax_t.text(i + 0.33, np.median(values), f"median {np.median(values):,.0f}", ha="left", va="center", fontsize=7, color=INK_2)
+            ax_t.text(i + 0.33, np.median(values), f"median {np.median(values):,.0f}", ha="left", va="center", fontsize=9, color=INK_2)
         ax_t.set_yscale("log"); ax_t.set_xlim(-0.5, 3.9); ax_t.set_xticks(range(4)); ax_t.set_xticklabels([f"level {l}" for l in levels]); ax_t.set_ylabel(f"{tile_size} px tiles per slide (upper bound)")
         ax_t.set_title("How many tiles does each level give?")
 
@@ -486,7 +486,7 @@ def plot_slide_properties(table: pd.DataFrame, tile_size: int = 224, show: bool 
             left += share_year.loc[c].to_numpy()
         ax_c.set_yticks(range(len(years))); ax_c.set_yticklabels([f"{int(y)} (n = {int(class_by_year[y].sum())})" for y in years]); ax_c.invert_yaxis()
         ax_c.set_xlim(0, 100); ax_c.set_xlabel("% of the slides of the year"); ax_c.grid(False)
-        ax_c.legend(frameon=False, ncol=7, loc="upper center", bbox_to_anchor=(0.5, -0.18), fontsize=8)
+        ax_c.legend(frameon=False, ncol=7, loc="upper center", bbox_to_anchor=(0.5, -0.18), fontsize=10)
         ax_c.set_title("Does the class mix change with scan year?")
 
     if show:

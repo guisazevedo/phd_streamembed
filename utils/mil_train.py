@@ -10,6 +10,7 @@ from sklearn.metrics import balanced_accuracy_score, f1_score
 
 # Internal imports ********************************************************************************
 from utils.class_weights import class_counts, compute_class_weights, weighted_cross_entropy
+from utils.classification_metrics import TIERS
 from utils.mil_data import batch_iterator, fit_scaler
 from utils.mil_models import build_model
 
@@ -36,6 +37,27 @@ def set_seed(seed: int) -> None:
 def _autocast(device: torch.device):
     """bfloat16 mixed precision on CUDA; plain float32 on every other device."""
     return torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=device.type == "cuda")
+
+
+def _tier_matrix(classes: list[str]) -> torch.Tensor:
+    """[n_classes, n_tiers] one-hot matrix that maps a class to its clinical tier (see classification_metrics.TIERS)."""
+    names = list(TIERS)
+    matrix = torch.zeros(len(classes), len(names))
+    for i, c in enumerate(classes):
+        owner = [t for t, members in TIERS.items() if c in members]
+        if not owner:
+            raise ValueError(f"Class {c!r} belongs to no tier of classification_metrics.TIERS; the coarse loss cannot be used.")
+        matrix[i, names.index(owner[0])] = 1.0
+
+    return matrix
+
+
+def _coarse_loss(logits: torch.Tensor, y: torch.Tensor, tier_matrix: torch.Tensor, tier_weights: torch.Tensor) -> torch.Tensor:
+    """Tier-weighted negative log-likelihood of the true tier under the summed class probabilities of each tier."""
+    tier_probability = torch.softmax(logits.float(), dim=1) @ tier_matrix
+    tier_of_class = tier_matrix.argmax(1)
+
+    return torch.nn.functional.nll_loss(torch.log(tier_probability.clamp(min=1e-8)), tier_of_class[y], weight=tier_weights)
 
 
 def _label_map(table: pd.DataFrame, classes: list[str]) -> dict[str, int]:
@@ -106,6 +128,8 @@ def train_model(
     patience: int = 20,
     warmup_epochs: int = 5,
     verbose: bool = True,
+    tile_dropout: float = 0.0,
+    coarse_weight: float = 0.0,
     **model_kwargs,
 ) -> dict:
     """
@@ -116,7 +140,7 @@ def train_model(
     selection uses the unweighted Validation macro-F1 (ties broken by the Validation loss).
 
     * Arguments:
-    model_name: "linear" or "abmil"
+    model_name: "linear", "abmil" or "clam_mb"
     data: The output of mil_data.load_bags
     class_weights: The loss weights (compute them from the Training counts only), or None
     device: The device to run on (GPU when available, else CPU, see utils.device.get_device)
@@ -126,13 +150,26 @@ def train_model(
     weight_decay: The AdamW weight decay
     batch_size: The number of slides per batch
     max_tiles: The maximum number of tiles per slide in training (random subset each epoch; None = all)
-    patience: The number of epochs without improvement before stopping
+    patience: The number of epochs without improvement of the Validation macro-F1 before stopping; epochs of the
+        warm-up are not counted, so a run cannot stop before the warm-up has ended
     warmup_epochs: The number of warm-up epochs
     verbose: Whether to print one line every 10 epochs
+    tile_dropout: The fraction of the tiles of each training bag removed at random in every epoch (0 = none);
+        validation always uses every tile
+    coarse_weight: The weight of the coarse auxiliary loss (0 = none, the default); the loss is
+        (1 - coarse_weight) * (loss of the model) + coarse_weight * (coarse loss), where the coarse loss is the
+        negative log-likelihood of the true clinical tier (benign, atypical, malignant) under the summed
+        probabilities of the classes of each tier. Its tier weights are the mean class weight of the
+        Training slides of the tier, so the class weighting also acts on the tiers
     model_kwargs: Passed to the model (hidden, attention_dim, dropout)
 
-    Returns a dict with model (best weights, eval mode), scaler, history (DataFrame), best_epoch,
-    best (the Validation measures at the best epoch), seed and model_name.
+    For a model with needs_labels (CLAM-MB) the batch labels are passed to the model and the loss is
+    bag_weight * (class-weighted cross-entropy) + (1 - bag_weight) * (instance loss of the model); the
+    history then also has a train_instance_loss column. train_loss is always the slide-level loss, so the
+    models stay comparable. With coarse_weight > 0 the history has a train_coarse_loss column as well.
+
+    Returns a dict with model (best weights, eval mode), scaler, history (DataFrame), best_epoch, epochs_run,
+    best (the Validation measures at the best epoch), seed, model_name, weight_decay, tile_dropout and coarse_weight.
     """
 
     # STEP 1: Seed, select the slides, and make sure that no Testing slide is used
@@ -149,6 +186,8 @@ def train_model(
     y_val = np.array([labels[s] for s in val_slides])
     scaler = fit_scaler(data["bags"], train_slides)
     generator = torch.Generator().manual_seed(seed)
+    if not 0.0 <= coarse_weight <= 1.0:
+        raise ValueError(f"coarse_weight must be in [0, 1], got {coarse_weight}")
 
     # STEP 2: Model, loss, optimiser and learning-rate schedule
     model = build_model(model_name, data["dim"], len(classes), **model_kwargs).to(device)
@@ -157,24 +196,43 @@ def train_model(
     schedule = torch.optim.lr_scheduler.LambdaLR(
         optimiser, lambda e: (e + 1) / warmup_epochs if e < warmup_epochs else 0.5 * (1 + np.cos(np.pi * (e - warmup_epochs) / max(epochs - warmup_epochs, 1))))
 
+    # STEP 2b: The coarse (tier) loss: class-to-tier matrix and tier weights from the Training slides only
+    if coarse_weight > 0:
+        tier_matrix = _tier_matrix(classes).to(device)
+        counts = torch.as_tensor(class_counts([classes.index(str(l)) for l in train_table["label"]], len(classes)), dtype=torch.float32)
+        class_w = class_weights.float() if class_weights is not None else torch.ones(len(classes))
+        tier_weights = ((counts * class_w) @ tier_matrix.cpu()) / (counts @ tier_matrix.cpu()).clamp(min=1)
+        tier_weights = tier_weights.to(device)
+
     # STEP 3: Train, validate every epoch, keep the best epoch
+    needs_labels = getattr(model, "needs_labels", False)
     history, best, best_state, best_epoch, stale = [], None, None, 0, 0
     for epoch in range(1, epochs + 1):
         model.train()
-        losses = []
-        for x, mask, y, _ in batch_iterator(data["bags"], train_slides, labels, batch_size, device, scaler, max_tiles, True, generator):
+        losses, instance_losses, coarse_losses = [], [], []
+        for x, mask, y, _ in batch_iterator(data["bags"], train_slides, labels, batch_size, device, scaler, max_tiles, True, generator, tile_dropout):
             optimiser.zero_grad(set_to_none=True)
             with _autocast(device):
-                logits, _ = model(x, mask)
-                loss = loss_fn(logits.float(), y)
+                logits, _ = model(x, mask, y) if needs_labels else model(x, mask)
+                bag_loss = loss_fn(logits.float(), y)
+                loss = model.bag_weight * bag_loss + (1 - model.bag_weight) * model.instance_loss.float() if needs_labels else bag_loss
+                if coarse_weight > 0:
+                    coarse_loss = _coarse_loss(logits, y, tier_matrix, tier_weights)
+                    loss = (1 - coarse_weight) * loss + coarse_weight * coarse_loss
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimiser.step()
-            losses.append(loss.item())
+            losses.append(bag_loss.item())
+            if needs_labels:
+                instance_losses.append(model.instance_loss.item())
+            if coarse_weight > 0:
+                coarse_losses.append(coarse_loss.item())
         schedule.step()
 
         scores = _scores(y_val, predict(model, data, val_slides, device, scaler)["proba"], len(classes))
-        history.append({"epoch": epoch, "train_loss": float(np.mean(losses)), "lr": optimiser.param_groups[0]["lr"], **scores})
+        history.append({"epoch": epoch, "train_loss": float(np.mean(losses)), "lr": optimiser.param_groups[0]["lr"], **scores,
+                        **({"train_instance_loss": float(np.mean(instance_losses))} if needs_labels else {}),
+                        **({"train_coarse_loss": float(np.mean(coarse_losses))} if coarse_weight > 0 else {})})
 
         better = best is None or (scores["val_macro_f1"], -scores["val_loss"]) > (best["val_macro_f1"], -best["val_loss"])
         if better:
@@ -184,7 +242,7 @@ def train_model(
             stale += 1
         if verbose and (epoch % 10 == 0 or epoch == 1):
             print(f"  [{model_name} seed {seed}] epoch {epoch:3d}  train loss {history[-1]['train_loss']:.3f}  val loss {scores['val_loss']:.3f}  val macro-F1 {scores['val_macro_f1']:.3f}")
-        if stale >= patience:
+        if stale >= patience and epoch > warmup_epochs:
             break
 
     # STEP 4: Restore the best epoch
@@ -193,8 +251,8 @@ def train_model(
     if verbose:
         print(f"  [{model_name} seed {seed}] best epoch {best_epoch}: val macro-F1 {best['val_macro_f1']:.3f}, balanced accuracy {best['val_balanced_accuracy']:.3f}")
 
-    return {"model": model, "scaler": scaler, "history": pd.DataFrame(history), "best_epoch": best_epoch, "best": best, "seed": seed, "model_name": model_name,
-            "model_kwargs": model_kwargs, "in_dim": data["dim"], "classes": classes}
+    return {"model": model, "scaler": scaler, "history": pd.DataFrame(history), "best_epoch": best_epoch, "epochs_run": len(history), "best": best, "seed": seed,
+            "model_name": model_name, "model_kwargs": model_kwargs, "weight_decay": weight_decay, "tile_dropout": tile_dropout, "coarse_weight": coarse_weight, "in_dim": data["dim"], "classes": classes}
 
 
 def run_seeds(model_name: str, seeds: list[int], data: dict, class_weights: torch.Tensor | None, device: torch.device, **kwargs) -> list[dict]:
@@ -251,6 +309,57 @@ def compare_weightings(data: dict, device: torch.device, seeds: list[int], optio
     return pd.DataFrame(rows).sort_values("val_macro_f1_mean", ascending=False).reset_index(drop=True)
 
 
+def regularisation_grid(dropouts: tuple[float, ...], weight_decays: tuple[float, ...], tile_dropouts: tuple[float, ...]) -> list[dict]:
+    """Every combination of the three regularisers as a list of {"dropout", "weight_decay", "tile_dropout"} dicts."""
+    return [{"dropout": d, "weight_decay": w, "tile_dropout": t} for t in tile_dropouts for d in dropouts for w in weight_decays]
+
+
+def compare_regularisation(
+    data: dict,
+    device: torch.device,
+    seeds: list[int],
+    class_weights: torch.Tensor | None,
+    grid: list[dict],
+    model_name: str = "abmil",
+    **kwargs,
+) -> pd.DataFrame:
+    """
+    Compare combinations of dropout, weight decay and tile dropout on the Validation set (never on the Testing set).
+
+    Each combination is trained once per seed (same seeds for every combination). The table gives, per
+    combination, the mean and standard deviation over seeds of the best Validation macro-F1 and balanced
+    accuracy, the mean best epoch and number of epochs run, and the training and Validation loss at the
+    best epoch with their difference (a direct measure of overfitting). The training loss is the
+    class-weighted loss with dropout active and the Validation loss is unweighted, so the gap is only
+    comparable between rows of the same table. Rows are sorted by macro-F1 (ties: lower Validation loss);
+    the first row is the choice.
+
+    * Arguments:
+    data: The output of mil_data.load_bags
+    device: The device to run on
+    seeds: The seeds (the same for every combination)
+    class_weights: The loss weights (from the Training counts only), or None
+    grid: A list of dicts with dropout, weight_decay and tile_dropout (see regularisation_grid)
+    model_name: The model to train ("linear", "abmil" or "clam_mb")
+    kwargs: Passed to train_model (epochs, lr, patience, model settings such as k_sample ...); the three
+        regularisers of the grid override the same keys here
+    """
+    rows = []
+    for setting in grid:
+        runs = run_seeds(model_name, seeds, data, class_weights, device, verbose=False, **{**kwargs, **setting})
+        f1 = np.array([r["best"]["val_macro_f1"] for r in runs])
+        bal = np.array([r["best"]["val_balanced_accuracy"] for r in runs])
+        at_best = [r["history"].set_index("epoch").loc[r["best_epoch"]] for r in runs]
+        train_loss, val_loss = np.mean([h["train_loss"] for h in at_best]), np.mean([h["val_loss"] for h in at_best])
+        rows.append({"model": model_name, **setting,
+                     "val_macro_f1_mean": f1.mean(), "val_macro_f1_sd": f1.std(ddof=1) if len(f1) > 1 else 0.0,
+                     "val_balanced_accuracy_mean": bal.mean(), "val_balanced_accuracy_sd": bal.std(ddof=1) if len(bal) > 1 else 0.0,
+                     "best_epoch_mean": np.mean([r["best_epoch"] for r in runs]), "epochs_run_mean": np.mean([r["epochs_run"] for r in runs]),
+                     "train_loss": train_loss, "val_loss": val_loss, "loss_gap": val_loss - train_loss})
+
+    return pd.DataFrame(rows).sort_values(["val_macro_f1_mean", "val_loss"], ascending=[False, True]).reset_index(drop=True)
+
+
 def device_description(device: torch.device) -> dict:
     """Name and numeric precision of the device that a run used (recorded with the results)."""
     import platform
@@ -259,12 +368,28 @@ def device_description(device: torch.device) -> dict:
     return {"type": device.type, "name": name, "precision": "bfloat16 autocast" if device.type == "cuda" else "float32"}
 
 
+def select_best_run(runs: dict[str, list[dict]]) -> dict:
+    """
+    Select the single best trained model: the run with the highest macro-F1 on its early-stopping slides
+    (ties: lowest early-stopping loss) among all models, folds and repeats. The Testing set plays no part.
+
+    * Arguments:
+    runs: {model: list of train_model results}
+
+    Returns the train_model result of the selected run.
+    """
+    candidates = [r for results in runs.values() for r in results]
+
+    return max(candidates, key=lambda r: (r["best"]["val_macro_f1"], -r["best"]["val_loss"]))
+
+
 def save_best_model(runs: dict[str, list[dict]], directory, config: dict | None = None) -> "Path":
     """
     Save the single best trained classifier to <directory>/classifier_model_<date>_<time>.pt.
 
-    "Best" is the run with the highest Validation macro-F1 (ties: lowest Validation loss) among all models and
-    seeds. The choice never uses the Testing set. The file holds everything needed to use the model later (see
+    "Best" is chosen by select_best_run: the highest macro-F1 on the early-stopping slides of the fold (ties:
+    lowest early-stopping loss) among all models, folds and repeats. The choice never uses the Testing set. The
+    file holds everything needed to use the model later (see
     load_classifier): the weights, the class names of BRACS.xlsx, the feature scaler (fitted on the Training
     slides), the architecture settings, the Validation result and the configuration of the run.
 
@@ -279,9 +404,8 @@ def save_best_model(runs: dict[str, list[dict]], directory, config: dict | None 
     from datetime import datetime
     from pathlib import Path
 
-    # STEP 1: The best run on the Validation set
-    candidates = [r for results in runs.values() for r in results]
-    best = max(candidates, key=lambda r: (r["best"]["val_macro_f1"], -r["best"]["val_loss"]))
+    # STEP 1: The best run on the early-stopping slides
+    best = select_best_run(runs)
 
     # STEP 2: Write one self-describing file
     folder = Path(directory)

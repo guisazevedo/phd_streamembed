@@ -155,14 +155,14 @@ def plot_loss_weighting(
     x = np.arange(K)
     with plt.rc_context(STYLE):
         fig = plt.figure(figsize=(15, 12.5), layout="constrained")
-        fig.suptitle(f"Class imbalance and loss weighting · {N:,} Training samples, {K} classes", fontsize=14, weight="bold", x=0.01, ha="left")
+        fig.suptitle(f"Class imbalance and loss weighting · {N:,} Training samples, {K} classes", fontsize=16, weight="bold", x=0.01, ha="left")
         rows = fig.subfigures(2, 1, height_ratios=[1, 1.15])
 
         top = split_with_notes(rows[0], notes_top, [1, 1.3], 15, plot_height=3.4, note_height=2.0)
         ax_n, ax_w = top.subplots(1, 2, width_ratios=[1, 1.3])
         ax_n.bar(x, counts, color=SERIES[0], edgecolor=SURFACE, linewidth=1.5, width=0.7)
         for i in range(K):
-            ax_n.text(i, counts[i], f"{counts[i]}\n{100 * counts[i] / N:.0f}%", ha="center", va="bottom", fontsize=8, color=INK_2)
+            ax_n.text(i, counts[i], f"{counts[i]}\n{100 * counts[i] / N:.0f}%", ha="center", va="bottom", fontsize=10, color=INK_2)
         ax_n.set_xticks(x); ax_n.set_xticklabels(classes); ax_n.set_ylim(0, counts.max() * 1.2); ax_n.set_ylabel("samples")
         ax_n.set_title("How imbalanced is the Training set?")
 
@@ -181,18 +181,18 @@ def plot_loss_weighting(
             ax_s.bar(x - 0.4 + width * (j + 0.5), share[m], width=width, color=colors[m], edgecolor=SURFACE, linewidth=1, label=m)
         ax_s.axhline(100 / K, color=INK_2, ls="--", lw=1)
         ax_s.set_xticks(x); ax_s.set_xticklabels(classes); ax_s.set_ylabel("share of the total loss (%)")
-        ax_s.set_title("Which classes drive the loss?"); ax_s.legend(frameon=False, ncol=2, fontsize=8)
+        ax_s.set_title("Which classes drive the loss?"); ax_s.legend(frameon=False, ncol=2, fontsize=10)
 
         px = np.arange(len(predictors))
         for j, m in enumerate(names):
             vals = [reference[name][m] for name in predictors]
             ax_r.bar(px - 0.4 + width * (j + 0.5), vals, width=width, color=colors[m], edgecolor=SURFACE, linewidth=1, label=m)
             for xi, v in zip(px - 0.4 + width * (j + 0.5), vals):
-                ax_r.text(xi, v, f"{v:.2f}", ha="center", va="bottom", fontsize=7, color=INK_2)
+                ax_r.text(xi, v, f"{v:.2f}", ha="center", va="bottom", fontsize=9, color=INK_2)
         ax_r.axhline(np.log(K), color=INK_2, ls=":", lw=1)
-        ax_r.text(px[-1] + 0.45, np.log(K), " log K", va="bottom", ha="right", fontsize=8, color=INK_2)
+        ax_r.text(px[-1] + 0.45, np.log(K), " log K", va="bottom", ha="right", fontsize=10, color=INK_2)
         ax_r.set_xticks(px); ax_r.set_xticklabels(list(predictors)); ax_r.set_ylabel("cross-entropy on Training labels")
-        ax_r.set_title("Which predictor does each loss reward?"); ax_r.legend(frameon=False, ncol=2, fontsize=8)
+        ax_r.set_title("Which predictor does each loss reward?"); ax_r.legend(frameon=False, ncol=2, fontsize=10)
 
     if show:
         plt.show()

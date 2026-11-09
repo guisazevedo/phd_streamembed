@@ -1,6 +1,6 @@
 # IMPORTS *****************************************************************************************
 # External libraries
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import partial
 from pathlib import Path
 import inspect
@@ -9,6 +9,7 @@ import warnings
 import numpy as np
 import pyvips
 from PIL import Image
+from tqdm.auto import tqdm
 from torch.utils.data import Dataset
 
 # Internal imports ********************************************************************************
@@ -85,6 +86,7 @@ class WSITileDataset(Dataset):
     tile_filter: The optional filter used to skip background or invalid tiles
     index_workers: The number of processes used to index slides (None = all CPU cores, 1 = serial);
         the tile filter must be picklable when more than one is used
+    show_progress: Whether to show a progress bar (slides indexed, elapsed time and estimated time left)
     """
 
     # Workable file extensions
@@ -103,6 +105,7 @@ class WSITileDataset(Dataset):
         basic_transform=None,
         tile_filter: TileFilter | None = None,
         index_workers: int | None = None,
+        show_progress: bool = True,
     ):
         """
         Initialize the tile dataset and index every valid tile.
@@ -115,6 +118,7 @@ class WSITileDataset(Dataset):
         basic_transform: The transform applied to each tile before it is returned
         tile_filter: The optional filter used to skip background or invalid tiles
         index_workers: The number of processes used to index slides (None = all CPU cores, 1 = serial)
+        show_progress: Whether to show a progress bar while the slides are indexed
         """
 
         # STEP 1: Validate dataset parameters
@@ -136,6 +140,7 @@ class WSITileDataset(Dataset):
         self.stride = stride if stride is not None else tile_size
         self.tile_filter = tile_filter
         self.index_workers = index_workers if index_workers is not None else os.cpu_count() or 1
+        self.show_progress = show_progress
         # TODO: I should only transform if pass filter, right???
         self.transform = basic_transform
 
@@ -217,10 +222,12 @@ class WSITileDataset(Dataset):
         Index all tile coordinates for every slide in the dataset.
 
         The optional tile filter is applied during indexing so filtered tiles
-        are never returned by __getitem__.
+        are never returned by __getitem__. A progress bar over slides (with elapsed time and
+        estimated time left) is shown when show_progress is True.
         """
 
-        # STEP 1: Index every slide, in parallel across processes (map keeps the sorted order)
+        # STEP 1: Index every slide, in parallel across processes; results are stored by slide position
+        # so the sorted order is kept, while the progress bar advances as soon as any slide is done
         index_slide = partial(
             _index_slide,
             level=self.level,
@@ -229,12 +236,18 @@ class WSITileDataset(Dataset):
             tile_filter=self.tile_filter,
         )
         workers = min(self.index_workers, len(self.slide_paths))
+        bar = dict(total=len(self.slide_paths), desc="Indexing slides", unit="slide", disable=not self.show_progress)
 
         if workers > 1:
+            results = [None] * len(self.slide_paths)
+
             with ProcessPoolExecutor(max_workers=workers) as pool:
-                results = list(pool.map(index_slide, self.slide_paths))
+                futures = {pool.submit(index_slide, path): position for position, path in enumerate(self.slide_paths)}
+
+                for future in tqdm(as_completed(futures), **bar):
+                    results[futures[future]] = future.result()
         else:
-            results = [index_slide(path) for path in self.slide_paths]
+            results = [index_slide(path) for path in tqdm(self.slide_paths, **bar)]
 
         # STEP 2: Collect the results slide by slide
         for slide_path, (level_pages, coordinates, unreadable) in zip(self.slide_paths, results):

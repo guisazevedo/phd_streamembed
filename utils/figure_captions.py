@@ -11,7 +11,7 @@ def split_with_notes(
     row_width_in: float,
     plot_height: float,
     note_height: float,
-    fontsize: float = 8.5,
+    fontsize: float = 10.5,
     color: str = "#52514e",
 ):
     """
