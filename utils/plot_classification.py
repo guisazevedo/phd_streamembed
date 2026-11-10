@@ -136,23 +136,24 @@ def plot_bag_sizes(data: dict, show: bool = True):
     return _finish(fig, show)
 
 
-def plot_training_curves(histories: dict[str, list[pd.DataFrame]], show: bool = True):
+def plot_training_curves(histories: dict[str, list[pd.DataFrame]], show: bool = True, weighted_val_loss: bool = False):
     """
     Training and early-stopping (Validation) curves of every model, averaged over seeds or fold models.
 
     * Arguments:
     histories: {model: [history DataFrame of each run]} from mil_train.train_model (seeds, or the fold models of a cross-validation)
     show: Whether to call plt.show() (the figure is returned either way)
+    weighted_val_loss: Whether the early-stopping loss in the histories is class-weighted (train_model weighted_val_loss=True)
     """
-
-    notes = [(0, 3, "Training loss (class-weighted cross-entropy), early-stopping loss (unweighted cross-entropy) and early-stopping macro-averaged F1 per epoch; the early-stopping slides "
+    kind = "class-weighted" if weighted_val_loss else "unweighted"
+    notes = [(0, 3, f"Training loss (class-weighted cross-entropy), early-stopping loss ({kind} cross-entropy) and early-stopping macro-averaged F1 per epoch; the early-stopping slides "
                     "are the slides on which the epoch is selected (the Validation slides, or in cross-validation a part of each fold that is held out from the fit). "
                     "Lines, mean over runs; bands, ± one standard deviation; triangles, the epoch selected for each run (best early-stopping macro-F1).\n"
                     "A training loss that keeps falling while the early-stopping loss rises and its F1 stalls indicates overfitting; selecting the epoch "
                     "on the F1 and restoring its weights limits the damage. The early-stopping set is small, so the selected epoch is itself uncertain, which "
-                    "is one reason for averaging several runs. The training loss is weighted and the early-stopping loss is not, so the two are not on the same scale.")]
+                    "is one reason for averaging several runs. " + ("Both losses use the same class weights, but they are computed on different slides, so the values are comparable only in trend." if weighted_val_loss else "The training loss is weighted and the early-stopping loss is not, so the two are not on the same scale."))]
     panels = [("train_loss", "training loss (weighted)", "Does the model fit the Training set?"),
-              ("val_loss", "early-stopping loss (unweighted)", "Does it generalise to the early-stopping slides?"),
+              ("val_loss", f"early-stopping loss ({kind})", "Does it generalise to the early-stopping slides?"),
               ("val_macro_f1", "early-stopping macro F1", "Which epoch is selected?")]
     with plt.rc_context(STYLE):
         fig = plt.figure(figsize=(15, 5.6), layout="constrained")

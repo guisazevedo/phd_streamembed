@@ -1,6 +1,6 @@
 # What to do better: 3-class (benign / atypical / malignant) and cancer vs not
 
-Context: results of `02_vectors_to_classifier.ipynb` on the official BRACS Testing set (87 slides). The tiers are currently obtained by summing the 7-class probabilities; no model is trained directly on 3 classes or 2 classes.
+Context: results of `../02_vectors_to_classifier.ipynb` on the official BRACS Testing set (87 slides). The tiers are currently obtained by summing the 7-class probabilities; no model is trained directly on 3 classes or 2 classes.
 
 | | ABMIL | CLAM-MB |
 |---|---|---|

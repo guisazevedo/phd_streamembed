@@ -102,10 +102,11 @@ def predict(
     return {"proba": np.concatenate(probabilities), "attention": weights if attention else None}
 
 
-def _scores(y: np.ndarray, proba: np.ndarray, n_classes: int) -> dict:
-    """Validation measures used for model selection."""
+def _scores(y: np.ndarray, proba: np.ndarray, n_classes: int, class_weights: np.ndarray | None = None) -> dict:
+    """Validation measures used for model selection; the loss is the class-weighted mean (as in PyTorch) when class_weights is given."""
     pred = proba.argmax(1)
-    loss = float(-np.log(np.clip(proba[np.arange(len(y)), y], 1e-12, None)).mean())
+    nll = -np.log(np.clip(proba[np.arange(len(y)), y], 1e-12, None))
+    loss = float(nll.mean() if class_weights is None else (class_weights[y] * nll).sum() / class_weights[y].sum())
 
     return {
         "val_loss": loss,
@@ -130,6 +131,7 @@ def train_model(
     verbose: bool = True,
     tile_dropout: float = 0.0,
     coarse_weight: float = 0.0,
+    weighted_val_loss: bool = False,
     **model_kwargs,
 ) -> dict:
     """
@@ -161,6 +163,8 @@ def train_model(
         negative log-likelihood of the true clinical tier (benign, atypical, malignant) under the summed
         probabilities of the classes of each tier. Its tier weights are the mean class weight of the
         Training slides of the tier, so the class weighting also acts on the tiers
+    weighted_val_loss: Whether the Validation loss (history, tie-break of the epoch selection) is the class-weighted
+        cross-entropy with class_weights, like the training loss (False = unweighted, the default)
     model_kwargs: Passed to the model (hidden, attention_dim, dropout)
 
     For a model with needs_labels (CLAM-MB) the batch labels are passed to the model and the loss is
@@ -229,7 +233,8 @@ def train_model(
                 coarse_losses.append(coarse_loss.item())
         schedule.step()
 
-        scores = _scores(y_val, predict(model, data, val_slides, device, scaler)["proba"], len(classes))
+        val_weights = class_weights.cpu().numpy().astype(float) if weighted_val_loss and class_weights is not None else None
+        scores = _scores(y_val, predict(model, data, val_slides, device, scaler)["proba"], len(classes), val_weights)
         history.append({"epoch": epoch, "train_loss": float(np.mean(losses)), "lr": optimiser.param_groups[0]["lr"], **scores,
                         **({"train_instance_loss": float(np.mean(instance_losses))} if needs_labels else {}),
                         **({"train_coarse_loss": float(np.mean(coarse_losses))} if coarse_weight > 0 else {})})

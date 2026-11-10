@@ -13,6 +13,7 @@ The work is organised as numbered notebooks. Each one keeps its code thin; the l
 | `00_data_visualization.ipynb` | the data set: labels, audit of the official split, slide properties, pyramid levels, class weights | done |
 | `01_wsi_to_vectors.ipynb` | slides to tile embeddings, and inspection of the embeddings | done |
 | `02_vectors_to_classifier.ipynb` | PyTorch classifier (multiple-instance learning) on the saved vectors, with a full set of metrics on the official Testing set | done |
+| `02_1_vector_to_final_classifier.ipynb` | one CLAM-MB per label set (Benign/Atypical/Malignant, Non-cancer/Cancer, Non-cancer/DCIS/IC) with confusion matrix, ROC/AUROC, accuracy, F1, sensitivity, specificity and precision on the Testing set | done |
 | `03_reidentification_risk_assessment.ipynb` | re-identification risk assessment | planned (empty) |
 
 ## The data set
@@ -307,6 +308,57 @@ flowchart TD
 - **Input:** the per-slide feature files of notebook 01 and `labels/BRACS.xlsx`.
 - **Output:** the results are shown in the notebook; the only file written is the best classifier with its configuration (seeds, selected weighting, tiling, versions, device). The Testing labels are used only in section 6.
 
+### `02_1_vector_to_final_classifier.ipynb`: one CLAM-MB per label set
+
+```mermaid
+flowchart TD
+    subgraph IN["Inputs"]
+        FEAT[("FEATURES_DIR/UNI2-h/<br/>one .pt file per slide (from 01)")]
+        LAB[("labels/BRACS.xlsx<br/>class, patient, official set")]
+    end
+
+    subgraph S3["3. Data"]
+        D1["3.1 build_slide_table + load_bags"]
+        D2["3.2 make_holdout_split<br/>fit / early stopping (patient-grouped)"]
+        D3["3.3 relabel_table<br/>three label sets"]
+    end
+
+    subgraph S4["4. Training (one CLAM-MB per label set)"]
+        T1["train_final<br/>constants fixed from 02"]
+        T2["plot_training_curves"]
+    end
+
+    subgraph S5["5. Evaluation (Testing set, used once)"]
+        E1["predict_testing"]
+        E2["class_views + bootstrap_views<br/>accuracy, F1, recall, precision,<br/>sensitivity, specificity, AUROC"]
+        E3["plot_final_results<br/>confusion matrix + ROC"]
+    end
+
+    subgraph S7["7-8. Two-stage (Cancer, then DCIS / IC)"]
+        H1["make_stage2_table + train_final<br/>DCIS / IC on cancer slides only"]
+        H2["cascade_predict<br/>Cancer? then DCIS / IC; 3x3 confusion matrix"]
+        H3["class_views + paired_bootstrap_views<br/>vs the flat 3-class model"]
+    end
+
+    OUT[("classifier/final/label set/<br/>classifier_model_date-time.pt")]
+
+    FEAT --> D1
+    LAB --> D1
+    D1 --> D2
+    D2 --> D3
+    D3 --> T1
+    T1 --> T2
+    T1 --> E1
+    E1 --> E2
+    E1 --> E3
+    T1 --> OUT
+    D2 --> H1
+    T1 --> H2
+    H1 --> H2
+    H2 --> H3
+    H1 --> OUT
+```
+
 ### Planned notebooks
 
 | notebook | purpose | diagram |
@@ -319,6 +371,7 @@ flowchart TD
 00_data_visualization.ipynb   data set: labels, split audit, slide properties, class weights
 01_wsi_to_vectors.ipynb       tiling -> embedding -> inspection
 02_vectors_to_classifier.ipynb  MIL classifier on the embeddings, metrics on the Testing set
+021_vector_to_final_classifier.ipynb  one CLAM-MB per label set, metrics on the Testing set
 03_reidentification_risk_assessment.ipynb   planned (empty)
 labels/BRACS.xlsx             slide labels, patients, official split, RoIs
 outputs/                      tables written by notebook 00 (slides.csv, class_weights.csv)
