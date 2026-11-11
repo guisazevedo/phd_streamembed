@@ -12,8 +12,8 @@ The work is organised as numbered notebooks. Each one keeps its code thin; the l
 |---|---|---|
 | `00_data_visualization.ipynb` | the data set: labels, audit of the official split, slide properties, pyramid levels, class weights | done |
 | `01_wsi_to_vectors.ipynb` | slides to tile embeddings, and inspection of the embeddings | done |
-| `02_vectors_to_classifier.ipynb` | PyTorch classifier (multiple-instance learning) on the saved vectors, with a full set of metrics on the official Testing set | done |
-| `02_1_vector_to_final_classifier.ipynb` | one CLAM-MB per label set (Benign/Atypical/Malignant, Non-cancer/Cancer, Non-cancer/DCIS/IC) with confusion matrix, ROC/AUROC, accuracy, F1, sensitivity, specificity and precision on the Testing set | done |
+| `02_0_vectors_to_classifier_selector.ipynb` | PyTorch classifier (multiple-instance learning) on the saved vectors, with a full set of metrics on the official Testing set | done |
+| `02_1_vector_to_classifier_labels.ipynb` | one CLAM-MB per label set (Benign/Atypical/Malignant, Non-cancer/Cancer, Non-cancer/DCIS/IC) with confusion matrix, ROC/AUROC, accuracy, F1, sensitivity, specificity and precision on the Testing set | done |
 | `03_reidentification_risk_assessment.ipynb` | re-identification risk assessment | planned (empty) |
 
 ## The data set
@@ -39,7 +39,7 @@ The work is organised as numbered notebooks. Each one keeps its code thin; the l
 4. **Save** features per slide (`generate_features`, `utils/generate_features.py`).
 5. **Inspect** one file or all slides (`utils/inspect_features.py`, `utils/cls_overview.py`), choose the number of clusters (`utils/cluster_quality.py`) and compare the embeddings with the 7 classes (`utils/class_analysis.py`, labels from `labels/BRACS.xlsx`).
 
-Steps 1 to 5 are in `01_wsi_to_vectors.ipynb`. The classifier that uses the embeddings is in `02_vectors_to_classifier.ipynb` (see below).
+Steps 1 to 5 are in `01_wsi_to_vectors.ipynb`. The classifier that uses the embeddings is in `02_0_vectors_to_classifier_selector.ipynb` (see below).
 
 ## Output format
 
@@ -59,7 +59,7 @@ Load a file with `torch.load(path, weights_only=True)`.
 
 ## The classifier
 
-A slide is a bag of tile embeddings with one label, so classification is **multiple-instance learning**. `02_vectors_to_classifier.ipynb` trains two PyTorch models on the CLS embeddings and the 7 classes of `labels/BRACS.xlsx`:
+A slide is a bag of tile embeddings with one label, so classification is **multiple-instance learning**. `02_0_vectors_to_classifier_selector.ipynb` trains two PyTorch models on the CLS embeddings and the 7 classes of `labels/BRACS.xlsx`:
 
 - a **gated attention MIL model** (ABMIL, Ilse et al., 2018) that learns a weight for every tile, pools the tiles with these weights and classifies the result; its attention can be drawn on the slide;
 - **CLAM-MB** (Lu et al., 2021), which has one attention branch per class, so that every class gets its own slide vector, and adds an instance-level clustering loss on the tiles that the attention selects.
@@ -107,7 +107,7 @@ Run the notebooks from the top, from the repository root.
 | `BATCH_SIZE` | tiles per model call |
 | `DATA_DIR`, `FEATURES_DIR` | slide folder and output folder |
 
-**`02_vectors_to_classifier.ipynb`** (section 2): `FEATURES_DIR`, `MODEL_NAME`, `LABELS_FILE`, `MODEL_DIR`, `SAVE_BEST_MODEL`, `SEED`, `N_SEEDS`, `EPOCHS`, `PATIENCE`, `LR`, `WEIGHT_DECAY`, `BATCH_SIZE`, `MAX_TILES_TRAIN` (tiles per slide per epoch) and `N_BOOT`. Needs the feature files from notebook 01 (with `cls_features`; patch tokens are not used) and takes minutes on a GPU for features tiled at level 3.
+**`02_0_vectors_to_classifier_selector.ipynb`** (section 2): `FEATURES_DIR`, `MODEL_NAME`, `LABELS_FILE`, `MODEL_DIR`, `SAVE_BEST_MODEL`, `SEED`, `N_SEEDS`, `EPOCHS`, `PATIENCE`, `LR`, `WEIGHT_DECAY`, `BATCH_SIZE`, `MAX_TILES_TRAIN` (tiles per slide per epoch) and `N_BOOT`. Needs the feature files from notebook 01 (with `cls_features`; patch tokens are not used) and takes minutes on a GPU for features tiled at level 3.
 
 The number of tiles grows roughly 16-fold per pyramid level step towards level 1, and runtime and disk use grow with it. At level 3 the BRACS slides give about 94k tiles.
 
@@ -241,7 +241,7 @@ flowchart TD
 - **Input:** `.svs` slides, the UNI2-h checkpoint and, for section 4.4, `labels/BRACS.xlsx`.
 - **Output:** per-slide `.pt` files (`cls_features`, `coordinates`, `model_encoder`, `tile_params`, optional `patch_features`); the figures in section 4 are for checking only.
 
-### `02_vectors_to_classifier.ipynb`: embeddings to a slide classifier
+### `02_0_vectors_to_classifier_selector.ipynb`: embeddings to a slide classifier
 
 ```mermaid
 flowchart TD
@@ -308,7 +308,7 @@ flowchart TD
 - **Input:** the per-slide feature files of notebook 01 and `labels/BRACS.xlsx`.
 - **Output:** the results are shown in the notebook; the only file written is the best classifier with its configuration (seeds, selected weighting, tiling, versions, device). The Testing labels are used only in section 6.
 
-### `02_1_vector_to_final_classifier.ipynb`: one CLAM-MB per label set
+### `02_1_vector_to_classifier_labels.ipynb`: one CLAM-MB per label set
 
 ```mermaid
 flowchart TD
@@ -336,8 +336,9 @@ flowchart TD
 
     subgraph S7["7-8. Two-stage (Cancer, then DCIS / IC)"]
         H1["make_stage2_table + train_final<br/>DCIS / IC on cancer slides only"]
-        H2["cascade_predict<br/>Cancer? then DCIS / IC; 3x3 confusion matrix"]
+        H2["cascade_predict<br/>Cancer? then DCIS / IC; 3x3 confusion matrix<br/>(7.5: from the stage decisions)"]
         H3["class_views + paired_bootstrap_views<br/>vs the flat 3-class model"]
+        H4["7.6 ADH experiment: direct 4-class vs<br/>two-stage (ADH as cancer, then ADH / DCIS / IC)"]
     end
 
     OUT[("classifier/final/label set/<br/>classifier_model_date-time.pt")]
@@ -356,6 +357,8 @@ flowchart TD
     T1 --> H2
     H1 --> H2
     H2 --> H3
+    D2 --> H4
+    H4 --> OUT
     H1 --> OUT
 ```
 

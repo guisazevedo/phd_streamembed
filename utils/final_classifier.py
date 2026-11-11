@@ -372,3 +372,43 @@ def plot_final_results(
         plt.show()
 
     return fig
+
+
+def plot_two_stage_confusion(
+    name: str,
+    confusion: pd.DataFrame,
+    show: bool = True,
+):
+    """
+    Confusion matrix of a two-stage classifier built from the decisions of its two stages (no probabilities are combined).
+
+    * Arguments:
+    name: The name of the two-stage model (used in the title)
+    confusion: The confusion matrix of counts (rows true class, columns final decision)
+    show: Whether to call plt.show() (the figure is returned either way)
+    """
+    K = len(confusion)
+    notes = [
+        (0, 1, f"Confusion matrix of the {name} classifier on the Testing set: rows are the true classes, columns the final decision; colour, the share of the true class; numbers, the share (%) and the number of slides.\n"
+               "The final decision is the one actually given by the stage that decided: the first stage assigns the first class (the rest) or the positive group, and only the slides it assigns to the positive group are divided by the second stage among the remaining classes. "
+               "A slide of the rest class that passes the first stage cannot be corrected by the second. The Testing set has few slides in some classes, so read the counts with the percentages."),
+    ]
+    with plt.rc_context(STYLE):
+        fig = plt.figure(figsize=(8, 8.4), layout="constrained")
+        top = split_with_notes(fig, notes, [1], 8, plot_height=6.2, note_height=2.2)
+        ax = top.subplots(1, 1)
+
+        # STEP 1: Row-normalised heat map with the share and the count in every cell
+        counts = confusion.to_numpy()
+        share = counts / np.maximum(counts.sum(1, keepdims=True), 1) * 100
+        im = ax.imshow(share, cmap=SEQ, vmin=0, vmax=100)
+        ax.set_xticks(range(K)); ax.set_xticklabels(confusion.columns); ax.set_yticks(range(K)); ax.set_yticklabels(confusion.index); ax.grid(False)
+        for i in range(K):
+            for j in range(K):
+                ax.text(j, i, f"{share[i, j]:.0f}%\n({counts[i, j]})", ha="center", va="center", fontsize=12, color="white" if share[i, j] > 55 else INK_2)
+        ax.set_xlabel("final decision"); ax.set_ylabel("true class"); ax.set_title(f"{name}: confusion matrix")
+        top.colorbar(im, ax=ax, shrink=0.7, label="% of the true class")
+    if show:
+        plt.show()
+
+    return fig
