@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="Always" serverName="guisazevedo@workstation:22 password" exclude=".svn;.cvs;.idea;.DS_Store;.git;.hg;*.hprof;*.pyc, .venv" confirmBeforeUploading="false" confirmBeforeDeletion="false" autoUploadExternalChanges="true">
+  <component name="PublishConfigData" autoUpload="Always" serverName="phd_streamembed" exclude=".svn;.cvs;.idea;.DS_Store;.git;.hg;*.hprof;*.pyc, .venv" confirmBeforeUploading="false" confirmBeforeDeletion="false" autoUploadExternalChanges="true">
     <option name="confirmBeforeDeletion" value="false" />
     <option name="confirmBeforeUploading" value="false" />
     <serverData>
-      <paths name="guisazevedo@workstation:22 password">
+      <paths name="phd_streamembed">
         <serverdata>
           <mappings>
             <mapping deploy="/home/guisazevedo/Projects/01_accamargo/phd_streamembed" local="$PROJECT_DIR$" />
@@ -14,13 +14,13 @@
           </excludedPaths>
         </serverdata>
       </paths>
-      <paths name="workstation">
+      <paths name="research_bone_fracture">
         <serverdata>
           <mappings>
-            <mapping deploy="/home/guisazevedo/Projects/01_accamargo/phd_streamembed" local="$PROJECT_DIR$" web="/" />
+            <mapping deploy="/home/guisazevedo/Projects/00_swissanalytica/research_bone_fracture" local="$PROJECT_DIR$/../../../../swissanalytica/codebase/research_bone_fracture" web="/" />
           </mappings>
           <excludedPaths>
-            <excludedPath local="true" path="$PROJECT_DIR$/data" />
+            <excludedPath local="true" path="$PROJECT_DIR$/../../../../swissanalytica/codebase/research_bone_fracture/data" />
           </excludedPaths>
         </serverdata>
       </paths>
