@@ -2,3 +2,4 @@
 data/
 .idea/
 original_vit_model/
+__pycache__/

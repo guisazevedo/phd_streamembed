@@ -87,8 +87,13 @@ def fold_summary(folds: list[dict], classes: list[str]) -> pd.DataFrame:
 
 
 def fold_data(data: dict, fold: dict) -> dict:
-    """A copy of the mil_data.load_bags dict whose table is the fold table (the bags are shared, not copied)."""
-    return {**data, "table": fold["table"]}
+    """
+    A copy of the mil_data.load_bags dict whose table is the fold table (the bags are shared, not copied).
+
+    A fold that has the optional keys train_table and bags (see synthetic_slides.make_synthetic_folds) trains on
+    those instead; fold["table"] and the held-out slides stay the real ones.
+    """
+    return {**data, "table": fold.get("train_table", fold["table"]), "bags": fold.get("bags", data["bags"])}
 
 
 def cross_validate(

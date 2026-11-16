@@ -12,8 +12,11 @@ The work is organised as numbered notebooks. Each one keeps its code thin; the l
 |---|---|---|
 | `00_data_visualization.ipynb` | the data set: labels, audit of the official split, slide properties, pyramid levels, class weights | done |
 | `01_wsi_to_vectors.ipynb` | slides to tile embeddings, and inspection of the embeddings | done |
+| `01_2_wsi_to_mod_vectors.ipynb` | synthetic slides from the saved real tile embeddings, saved per cross-validation fold as `.pt` files (`level_1_mod/`) with a label file `labels/BRACS_mod.csv` | done |
 | `02_0_vectors_to_classifier_selector.ipynb` | PyTorch classifier (multiple-instance learning) on the saved vectors, with a full set of metrics on the official Testing set | done |
-| `02_1_vector_to_classifier_labels.ipynb` | one CLAM-MB per label set (Benign/Atypical/Malignant, Non-cancer/Cancer, Non-cancer/DCIS/IC) with confusion matrix, ROC/AUROC, accuracy, F1, sensitivity, specificity and precision on the Testing set | done |
+| `02_1_vector_to_classifier_experimentation.ipynb` | one CLAM-MB per label set (Benign/Atypical/Malignant, Non-cancer/Cancer, Non-cancer/DCIS/IC) with confusion matrix, ROC/AUROC, accuracy, F1, sensitivity, specificity and precision on the Testing set | done |
+| `02_2_vector_to_classifier_finetunning.ipynb` | Bayesian optimisation (optuna) of the direct 3-class CLAM-MB (Non-cancer / ADH+DCIS / IC) by patient-grouped cross-validation, an ensemble of the fold models, evaluated once on the Testing set; the 4-class version (with ADH as its own class) is kept in `02_2_vector_to_classifier_finetunning_4class.ipynb` | done |
+| `02_3_mod_vector_to_classifier_finetunning.ipynb` | the tuning of 02_2 with the model trained on synthetic slides (4096 or 8192 tiles drawn from real slides of one class, at least 12 sources, none above 20%, random tile order; 1000 per fold), scored on real held-out slides and evaluated once on the real Testing set | done |
 | `03_reidentification_risk_assessment.ipynb` | re-identification risk assessment | planned (empty) |
 
 ## The data set
@@ -241,6 +244,57 @@ flowchart TD
 - **Input:** `.svs` slides, the UNI2-h checkpoint and, for section 4.4, `labels/BRACS.xlsx`.
 - **Output:** per-slide `.pt` files (`cls_features`, `coordinates`, `model_encoder`, `tile_params`, optional `patch_features`); the figures in section 4 are for checking only.
 
+### `01_2_wsi_to_mod_vectors.ipynb`: synthetic slides to vectors
+
+```mermaid
+flowchart TD
+    subgraph IN["Inputs"]
+        FEAT[("level_1/UNI2-h/<br/>one .pt file per real slide (from 01)")]
+        LAB[("labels/BRACS.xlsx<br/>class, patient, official set")]
+    end
+
+    subgraph S3["3. Data"]
+        D1["3.1 build_slide_table + load_bags"]
+        D2["3.2 relabel_table<br/>Non-cancer / atypia-neoplasia / IC"]
+        D3["3.3 make_cv_folds<br/>patient-grouped, stratified"]
+    end
+
+    subgraph S4["4. Synthetic slides"]
+        R1["4.1 make_synthetic_folds<br/>N_TOTAL recipes per fold,<br/>fit and early-stopping slides only"]
+        R2["4.2 plot_synthetic_summary"]
+    end
+
+    subgraph S5["5. Saving"]
+        W1["save_synthetic_folds<br/>one .pt per synthetic slide"]
+        W2["write_mod_labels"]
+    end
+
+    subgraph S6["6. Verification"]
+        V1["reload + checks<br/>tiles, sources, folds"]
+    end
+
+    REC[("level_1_mod/recipes/<br/>synthetic_recipes.pt")]
+    OUT[("level_1_mod/UNI2-h/fold_k/<br/>SYN_*.pt")]
+    CSV[("labels/BRACS_mod.csv")]
+
+    FEAT --> D1
+    LAB --> D1
+    D1 --> D2
+    D2 --> D3
+    D3 --> R1
+    R1 --> REC
+    R1 --> R2
+    R1 --> W1
+    R1 --> W2
+    W1 --> OUT
+    W2 --> CSV
+    OUT --> V1
+    CSV --> V1
+```
+
+- **Input:** the per-slide `.pt` files of notebook 01 and `labels/BRACS.xlsx`.
+- **Output:** `<OUT_DIR>/UNI2-h/fold_<k>/SYN_*.pt` (same keys as the files of 01, plus `label`, `sources`, `counts`, `source_indices`, `source_ids`; zero `coordinates`), the recipes in `<OUT_DIR>/recipes/synthetic_recipes.pt` and `labels/BRACS_mod.csv` (columns `WSI Filename`, `Patient Id`, `WSI label`, `Set`, `fold`, `part`, `size`, `n_sources`, `max_share`, `sources`). The synthetic slides are made per fold, only from the fit / early-stopping slides of the fold, so the held-out patients leak nothing.
+
 ### `02_0_vectors_to_classifier_selector.ipynb`: embeddings to a slide classifier
 
 ```mermaid
@@ -308,7 +362,7 @@ flowchart TD
 - **Input:** the per-slide feature files of notebook 01 and `labels/BRACS.xlsx`.
 - **Output:** the results are shown in the notebook; the only file written is the best classifier with its configuration (seeds, selected weighting, tiling, versions, device). The Testing labels are used only in section 6.
 
-### `02_1_vector_to_classifier_labels.ipynb`: one CLAM-MB per label set
+### `02_1_vector_to_classifier_experimentation.ipynb`: one CLAM-MB per label set
 
 ```mermaid
 flowchart TD
@@ -339,6 +393,7 @@ flowchart TD
         H2["cascade_predict<br/>Cancer? then DCIS / IC; 3x3 confusion matrix<br/>(7.5: from the stage decisions)"]
         H3["class_views + paired_bootstrap_views<br/>vs the flat 3-class model"]
         H4["7.6 ADH experiment: direct 4-class vs<br/>two-stage (ADH as cancer, then ADH / DCIS / IC)"]
+        H5["10 Direct 3-class: Non-cancer / ADH&DCIS / IC<br/>vs the 4-class model with ADH and DCIS merged"]
     end
 
     OUT[("classifier/final/label set/<br/>classifier_model_date-time.pt")]
@@ -358,6 +413,8 @@ flowchart TD
     H1 --> H2
     H2 --> H3
     D2 --> H4
+    D2 --> H5
+    H4 --> H5
     H4 --> OUT
     H1 --> OUT
 ```
@@ -367,6 +424,70 @@ flowchart TD
 | notebook | purpose | diagram |
 |---|---|---|
 | `03_reidentification_risk_assessment.ipynb` | re-identification risk assessment | to be added |
+
+### `02_3_mod_vector_to_classifier_finetunning.ipynb`: tuning on synthetic slides
+
+```mermaid
+flowchart TD
+    subgraph IN["Inputs"]
+        FEAT[("FEATURES_DIR/UNI2-h/<br/>one .pt file per slide (from 01)")]
+        LAB[("labels/BRACS.xlsx<br/>class, patient, official set")]
+        MOD[("level_1_mod/UNI2-h/fold_k/<br/>synthetic .pt files (from 01_2)")]
+        LABM[("labels/BRACS_mod.csv<br/>synthetic slides, fold, part, sources")]
+        OLD[("classifier/final/<br/>models of 02_1 and 02_2")]
+    end
+
+    subgraph S3["3. Data"]
+        D1["3.1 build_slide_table + load_bags"]
+        D2["3.2 relabel_table<br/>Non-cancer / atypia-neoplasia / IC"]
+        D3["3.3 make_cv_folds<br/>patient-grouped, stratified (real slides)"]
+        D4["3.4 load_mod_folds<br/>synthetic slides per fold, sources checked<br/>against the fit and early-stopping slides"]
+    end
+
+    subgraph S4["4. Bayesian optimisation"]
+        B1["objective_factory + run_study<br/>TPE sampler, one trial = one 5-fold CV<br/>(train and stop on synthetic, score on real held-out)"]
+        B2["trials_table + plot_tuning"]
+    end
+
+    subgraph S5["5-6. Selection and confirmation"]
+        C1["select_setting<br/>recall floor, best macro-F1,<br/>one-standard-error rule"]
+        C2["cross_validate, 2 repeats,<br/>new seeds, top settings"]
+    end
+
+    subgraph S7["7. Ensemble"]
+        N1["oof_by_repeat + single_vs_ensemble<br/>out-of-fold, no Testing"]
+    end
+
+    subgraph S8["8. Testing set (real slides), used once"]
+        E1["predict_ensemble<br/>all fold models"]
+        E2["class_views + bootstrap_views<br/>plot_final_results"]
+        E3["paired_bootstrap_views<br/>vs the 02_1 and 02_2 models"]
+    end
+
+    OUT[("classifier/final/noncancer_noninvasive_invasive_synthetic/<br/>ensemble_date-time.pt")]
+
+    FEAT --> D1
+    LAB --> D1
+    D1 --> D2
+    D2 --> D3
+    D3 --> D4
+    MOD --> D4
+    LABM --> D4
+    D4 --> B1
+    B1 --> B2
+    B2 --> C1
+    C1 --> C2
+    C2 --> N1
+    N1 --> E1
+    E1 --> E2
+    E1 --> E3
+    OLD --> E3
+    N1 --> OUT
+```
+
+- **Synthetic slides:** made and saved by notebook 01_2 (`utils/synthetic_slides.py`: `save_synthetic_folds`, `write_mod_labels`); notebook 02_3 only loads them (`load_mod_folds`). For every fold, `N_TOTAL` (1000) slides, equal per class, 20% of them for early stopping, made only from the real fit / early-stopping slides of the fold. Size 4096 or 8192 tiles; at least `K_SLIDES` (12) source slides; no source above `TOP_PERCENTAGE` (20%) of the tiles; tiles drawn with replacement and shuffled. Only the recipes are stored (`outputs/02_3_synthetic/synthetic_recipes.pt`); `SyntheticBags` assembles the embeddings when a batch is built.
+- **Scoring:** the held-out slides of each fold and the Testing slides are real. The search is that of 02_2 without `max_tiles` (the size is fixed); the study (`three_class_synthetic`) is in `outputs/02_3_tuning/study.db`.
+- **Output:** `classifier/final/noncancer_noninvasive_invasive_synthetic/ensemble_<date-time>.pt`; the Testing results are compared with the 02_1 model and the 02_2 ensemble.
 
 ## Repository layout
 
@@ -382,7 +503,8 @@ classifier/                   best classifier saved by notebook 02 (classifier_m
 utils/                        code, by role:
     pipeline          dataset, clean_empty, transformer_basic, transformer_per_model, dataloader,
                       load_model, device, generate_features
-    classifier        mil_data, mil_models, mil_train, classification_metrics, plot_classification
+    classifier        mil_data, mil_models, mil_train, classification_metrics, plot_classification,
+                      mil_cv, mil_tuning, final_classifier, synthetic_slides
     data set          labels, slide_stats, dataset_overview, class_weights, plot_pyramid
     embeddings        plot_wsi, inspect_features, cls_data, cls_overview, cluster_quality, class_analysis
     figures           figure_captions (the caption under each panel)
@@ -402,3 +524,63 @@ data/                         slides (not versioned)
 - Notebook 02 evaluates on the official Testing set only once; with 87 Testing slides and classes of 7 to 20 slides, intervals are wide and small differences between models cannot be resolved. Slides without a feature file (for example without pyramid level 4) shrink the sets and are reported.
 - The loss weights shift the output probabilities towards the rare classes, so the probabilities are not calibrated to the true class frequencies.
 - Scan year is associated with class (Cramér's V 0.27); check for batch effects before interpreting classifier results.
+
+### `02_2_vector_to_classifier_finetunning.ipynb`: tuning of the direct three-class model
+
+```mermaid
+flowchart TD
+    subgraph IN["Inputs"]
+        FEAT[("FEATURES_DIR/UNI2-h/<br/>one .pt file per slide (from 01)")]
+        LAB[("labels/BRACS.xlsx<br/>class, patient, official set")]
+        OLD[("classifier/final/noncancer_adhdcis_ic/<br/>direct 3-class model of 02_1")]
+    end
+
+    subgraph S3["3. Data"]
+        D1["3.1 build_slide_table + load_bags"]
+        D2["3.2 relabel_table<br/>Non-cancer / atypia-neoplasia / IC"]
+        D3["3.3 make_cv_folds<br/>patient-grouped, stratified"]
+    end
+
+    subgraph S4["4. Bayesian optimisation"]
+        B1["objective_factory + run_study<br/>TPE sampler, one trial = one 5-fold CV"]
+        B2["trials_table + plot_tuning"]
+    end
+
+    subgraph S5["5-6. Selection and confirmation"]
+        C1["select_setting<br/>recall floor, best macro-F1,<br/>one-standard-error rule"]
+        C2["cross_validate, 2 repeats,<br/>new seeds, top settings"]
+    end
+
+    subgraph S7["7. Ensemble"]
+        N1["oof_by_repeat + single_vs_ensemble<br/>out-of-fold, no Testing"]
+    end
+
+    subgraph S8["8. Testing set, used once"]
+        E1["predict_ensemble<br/>all fold models"]
+        E2["class_views + bootstrap_views<br/>plot_final_results"]
+        E3["paired_bootstrap_views<br/>vs the 02_1 model"]
+    end
+
+    OUT[("classifier/final/noncancer_noninvasive_invasive_tuned/<br/>ensemble_date-time.pt")]
+
+    FEAT --> D1
+    LAB --> D1
+    D1 --> D2
+    D2 --> D3
+    D3 --> B1
+    B1 --> B2
+    B2 --> C1
+    C1 --> C2
+    C2 --> N1
+    N1 --> E1
+    E1 --> E2
+    E1 --> E3
+    OLD --> E3
+    N1 --> OUT
+```
+
+- **Classes:** Non-cancer (N, PB, UDH, FEA), non-invasive atypia/neoplasia (ADH, DCIS), invasive carcinoma (IC). ADH is joined to DCIS because the direct four-class model could not separate them (notebook `02_2_vector_to_classifier_finetunning_4class.ipynb`).
+- **Search:** optuna TPE over `lr`, `weight_decay`, `dropout`, `coarse_weight` (two tiers: Non-cancer vs lesion), `k_sample` and `max_tiles` (2048, 4096, 8192, None); 20 trials, each a 5-fold patient-grouped cross-validation scored by the pooled out-of-fold macro-F1. The study (`three_class`) is stored in `outputs/02_2_tuning/study.db` and can be resumed.
+- **Choice:** recall floor per class (`MIN_CLASS_RECALL`), best macro-F1, one-standard-error rule, confirmation of the top 2 settings with 2 repeats and new seeds. The Testing set is used once, at the end.
+- **Output:** the ensemble of the fold models of the chosen setting (5 folds x 2 repeats), `classifier/final/noncancer_noninvasive_invasive_tuned/ensemble_<date-time>.pt` (`utils.mil_tuning.save_ensemble` / `load_ensemble`).
+

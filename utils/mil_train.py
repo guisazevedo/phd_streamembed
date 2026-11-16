@@ -39,14 +39,15 @@ def _autocast(device: torch.device):
     return torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=device.type == "cuda")
 
 
-def _tier_matrix(classes: list[str]) -> torch.Tensor:
-    """[n_classes, n_tiers] one-hot matrix that maps a class to its clinical tier (see classification_metrics.TIERS)."""
-    names = list(TIERS)
+def _tier_matrix(classes: list[str], tiers: dict[str, list[str]] | None = None) -> torch.Tensor:
+    """[n_classes, n_tiers] one-hot matrix that maps a class to its clinical tier (default classification_metrics.TIERS)."""
+    tiers = TIERS if tiers is None else tiers
+    names = list(tiers)
     matrix = torch.zeros(len(classes), len(names))
     for i, c in enumerate(classes):
-        owner = [t for t, members in TIERS.items() if c in members]
+        owner = [t for t, members in tiers.items() if c in members]
         if not owner:
-            raise ValueError(f"Class {c!r} belongs to no tier of classification_metrics.TIERS; the coarse loss cannot be used.")
+            raise ValueError(f"Class {c!r} belongs to no tier; the coarse loss cannot be used.")
         matrix[i, names.index(owner[0])] = 1.0
 
     return matrix
@@ -132,6 +133,7 @@ def train_model(
     tile_dropout: float = 0.0,
     coarse_weight: float = 0.0,
     weighted_val_loss: bool = False,
+    tiers: dict[str, list[str]] | None = None,
     **model_kwargs,
 ) -> dict:
     """
@@ -165,6 +167,7 @@ def train_model(
         Training slides of the tier, so the class weighting also acts on the tiers
     weighted_val_loss: Whether the Validation loss (history, tie-break of the epoch selection) is the class-weighted
         cross-entropy with class_weights, like the training loss (False = unweighted, the default)
+    tiers: {tier: [classes]} of the coarse loss (None = classification_metrics.TIERS, the 7 BRACS classes); needed for other class sets
     model_kwargs: Passed to the model (hidden, attention_dim, dropout)
 
     For a model with needs_labels (CLAM-MB) the batch labels are passed to the model and the loss is
@@ -202,7 +205,7 @@ def train_model(
 
     # STEP 2b: The coarse (tier) loss: class-to-tier matrix and tier weights from the Training slides only
     if coarse_weight > 0:
-        tier_matrix = _tier_matrix(classes).to(device)
+        tier_matrix = _tier_matrix(classes, tiers).to(device)
         counts = torch.as_tensor(class_counts([classes.index(str(l)) for l in train_table["label"]], len(classes)), dtype=torch.float32)
         class_w = class_weights.float() if class_weights is not None else torch.ones(len(classes))
         tier_weights = ((counts * class_w) @ tier_matrix.cpu()) / (counts @ tier_matrix.cpu()).clamp(min=1)
