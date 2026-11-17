@@ -11,12 +11,15 @@ The work is organised as numbered notebooks. Each one keeps its code thin; the l
 | notebook | purpose | status |
 |---|---|---|
 | `00_data_visualization.ipynb` | the data set: labels, audit of the official split, slide properties, pyramid levels, class weights | done |
-| `01_wsi_to_vectors.ipynb` | slides to tile embeddings, and inspection of the embeddings | done |
-| `01_2_wsi_to_mod_vectors.ipynb` | synthetic slides from the saved real tile embeddings, saved per cross-validation fold as `.pt` files (`level_1_mod/`) with a label file `labels/BRACS_mod.csv` | done |
+| `01_1_wsi_to_vectors.ipynb` | slides to tile embeddings, and inspection of the embeddings | done |
+| `01_2_vectors_to_pca_analysis.ipynb` | PCA of the tile embeddings (explained variance, effective rank, reconstruction, cosine neighbourhood preservation) and the reduced embeddings saved as `pca_<d>/` | done |
+| `01_3_wsi_to_mod_vectors.ipynb` | synthetic slides from the saved real tile embeddings, saved per cross-validation fold as `.pt` files (`level_1_mod/`) with a label file `labels/BRACS_mod.csv` | done |
+| `01_3_pca_to_synthetic_vectors.ipynb` | synthetic WSI bags from the PCA-reduced vectors of 01_2: class-specific MiniBatchKMeans, blended real Training slides as composition templates (`N_TEMPLATES_PER_WSI`), per-cluster Gaussian sampling; saved under `synthetic/<method>/pca_<D>/k_<K>/` with the label sheet `labels/BRACS_synthetic.csv` | done |
 | `02_0_vectors_to_classifier_selector.ipynb` | PyTorch classifier (multiple-instance learning) on the saved vectors, with a full set of metrics on the official Testing set | done |
 | `02_1_vector_to_classifier_experimentation.ipynb` | one CLAM-MB per label set (Benign/Atypical/Malignant, Non-cancer/Cancer, Non-cancer/DCIS/IC) with confusion matrix, ROC/AUROC, accuracy, F1, sensitivity, specificity and precision on the Testing set | done |
 | `02_2_vector_to_classifier_finetunning.ipynb` | Bayesian optimisation (optuna) of the direct 3-class CLAM-MB (Non-cancer / ADH+DCIS / IC) by patient-grouped cross-validation, an ensemble of the fold models, evaluated once on the Testing set; the 4-class version (with ADH as its own class) is kept in `02_2_vector_to_classifier_finetunning_4class.ipynb` | done |
-| `02_3_mod_vector_to_classifier_finetunning.ipynb` | the tuning of 02_2 with the model trained on synthetic slides (4096 or 8192 tiles drawn from real slides of one class, at least 12 sources, none above 20%, random tile order; 1000 per fold), scored on real held-out slides and evaluated once on the real Testing set | done |
+| `02_3_pca_vector_to_classifier_finetunning.ipynb` | the tuning of 02_2 on the PCA-reduced vectors of 01_2 (`DIMENSION` components, 512 by default), scored on the same folds and evaluated once on the Testing set, and compared with the 1536-d models of 02_1 and 02_2 | done |
+| `02_4_synthetic_vector_to_classifier_finetunning.ipynb` | the tuning of 02_3 with the classifier fitted on the synthetic bags of 01_3 (number of clusters searched), stopped on real slides, scored by CV or on clean Validation slides (`SCORING`), evaluated once on the Testing set and compared with the models of 02_3, 02_2 and 02_1 | done |
 | `03_reidentification_risk_assessment.ipynb` | re-identification risk assessment | planned (empty) |
 
 ## The data set
@@ -42,7 +45,7 @@ The work is organised as numbered notebooks. Each one keeps its code thin; the l
 4. **Save** features per slide (`generate_features`, `utils/generate_features.py`).
 5. **Inspect** one file or all slides (`utils/inspect_features.py`, `utils/cls_overview.py`), choose the number of clusters (`utils/cluster_quality.py`) and compare the embeddings with the 7 classes (`utils/class_analysis.py`, labels from `labels/BRACS.xlsx`).
 
-Steps 1 to 5 are in `01_wsi_to_vectors.ipynb`. The classifier that uses the embeddings is in `02_0_vectors_to_classifier_selector.ipynb` (see below).
+Steps 1 to 5 are in `01_1_wsi_to_vectors.ipynb`. The classifier that uses the embeddings is in `02_0_vectors_to_classifier_selector.ipynb` (see below).
 
 ## Output format
 
@@ -101,7 +104,7 @@ Run the notebooks from the top, from the repository root.
 
 **`00_data_visualization.ipynb`** (section 2): `DATA_DIR`, `LABELS_FILE`, `OUTPUT_DIR`, `TILE_SIZE`, `TILE_EXAMPLE_LEVEL` and `SEED`. It writes `slides.csv` (one row per slide: label, patient, set, technical properties) and `class_weights.csv` (loss weights from the Training counts) to `OUTPUT_DIR`. A full run takes about ten seconds on the local data.
 
-**`01_wsi_to_vectors.ipynb`** (section 2.1):
+**`01_1_wsi_to_vectors.ipynb`** (section 2.1):
 
 | parameter | meaning |
 |---|---|
@@ -196,7 +199,7 @@ The official Training/Validation/Testing split is used unchanged (comparable wit
 - **Input:** `labels/BRACS.xlsx` and the `.svs` slides (headers only; pixels are read for the figures in section 5).
 - **Output:** `slides.csv` and `class_weights.csv`, plus the figures documenting the data. Later notebooks read these tables, so the split and the weights are the same everywhere.
 
-### `01_wsi_to_vectors.ipynb`: slides to tile embeddings
+### `01_1_wsi_to_vectors.ipynb`: slides to tile embeddings
 
 ```mermaid
 flowchart TD
@@ -244,7 +247,76 @@ flowchart TD
 - **Input:** `.svs` slides, the UNI2-h checkpoint and, for section 4.4, `labels/BRACS.xlsx`.
 - **Output:** per-slide `.pt` files (`cls_features`, `coordinates`, `model_encoder`, `tile_params`, optional `patch_features`); the figures in section 4 are for checking only.
 
-### `01_2_wsi_to_mod_vectors.ipynb`: synthetic slides to vectors
+### `01_2_vectors_to_pca_analysis.ipynb`: PCA of the tile embeddings
+
+```mermaid
+flowchart TD
+    subgraph IN["Inputs"]
+        FEAT[("level_1/UNI2-h/<br/>one .pt file per slide (from 01_1)")]
+        LAB[("labels/BRACS.xlsx<br/>class, patient, official set")]
+    end
+
+    subgraph S3["3. Data"]
+        D1["3.1 split_fit_eval<br/>Training fits, Validation evaluates"]
+        D2["3.2 sample_tiles + sampling_stats"]
+    end
+
+    subgraph S4["4-8. Analyses"]
+        P1["4 fit_pca"]
+        P2["5 variance_table"]
+        P3["6 spectrum_stats"]
+        P4["7 reconstruction_metrics"]
+        P5["8 neighbour_preservation"]
+    end
+
+    subgraph S9["9. Comparison"]
+        C1["final_comparison + recommend_dimensions"]
+    end
+
+    subgraph S10["10. Storage"]
+        W1["save_pca_embeddings"]
+    end
+
+    OUT[("pca_d/UNI2-h/<br/>slide .pt, pca_model.pt, metadata.json")]
+
+    FEAT --> D1
+    LAB --> D1
+    D1 --> D2
+    D2 --> P1
+    P1 --> P2
+    P1 --> P3
+    P1 --> P4
+    P1 --> P5
+    P2 --> C1
+    P4 --> C1
+    P5 --> C1
+    P1 --> W1
+    W1 --> OUT
+```
+
+- **Input:** the per-slide `.pt` files of notebook 01_1 and `labels/BRACS.xlsx`.
+- **Output:** `<PCA_OUTPUT_DIR>/pca_<d>/UNI2-h/<slide>.pt` (`cls_features` `[tiles, d]`, `coordinates`, `model_encoder`, `tile_params`, `pca`, `slide`, `label`, `patient`, `set`; tile order and coordinates as in the original), `pca_<d>/pca_model.pt` (mean, components, explained variance) and `pca_<d>/metadata.json`. The PCA is fitted on Training tiles only; Testing slides are only transformed. No figure is exported.
+
+### `01_3_pca_to_synthetic_vectors.ipynb`: synthetic WSI bags from the PCA vectors
+
+```mermaid
+flowchart TD
+    PCA[("pca_D/UNI2-h/<br/>one .pt file per slide (from 01_2)")] --> SEL["3. load_training_slides<br/>Training slides only, validated"]
+    LAB[("labels/BRACS.xlsx")] --> SEL
+    SEL --> KM["4. sample_class_tiles + fit_class_clusters<br/>MiniBatchKMeans per class and k"]
+    KM --> STAT["5. collect_class_statistics<br/>composition templates + Gaussian sums"]
+    STAT --> GAUSS["6. GaussianGenerator.fit"]
+    STAT --> GEN["7. generate_configuration<br/>blend of several templates (Dirichlet)"]
+    GAUSS --> GEN
+    GEN --> DIAG["8. diagnostics (tables, plots)"]
+    GEN --> OUT[("synthetic/method/pca_D/k_K/<br/>SYN_*.pt, metadata.json, cluster_models.pt, labels.csv")]
+    GEN --> SHEET[("labels/BRACS_synthetic.csv")]
+```
+
+- **Input:** the reduced vectors `<PCA_INPUT_DIR>/pca_<D>/UNI2-h/<slide>.pt` of 01_2 and the official split of `labels/BRACS.xlsx`. Only Training slides are used for clusters, Gaussians and templates.
+- **Output:** `<SYNTHETIC_OUTPUT_DIR>/<method>/pca_<D>/k_<K>/SYN_<method>_pca<D>_k<K>_<class>_<i>.pt` (the keys of the PCA files; `set` is `Synthetic`, no real identifiers), `metadata.json`, `cluster_models.pt`, `labels.csv`, and the CSV `labels/BRACS_synthetic.csv` (columns of `BRACS.xlsx` plus `method`, `pca_dim`, `k`, `n_tiles`, `n_templates`, `max_template_weight`). Only the Gaussian method is implemented; `GeneratorBase` is the extension point.
+
+### `01_3_wsi_to_mod_vectors.ipynb`: synthetic slides to vectors
 
 ```mermaid
 flowchart TD
@@ -425,27 +497,25 @@ flowchart TD
 |---|---|---|
 | `03_reidentification_risk_assessment.ipynb` | re-identification risk assessment | to be added |
 
-### `02_3_mod_vector_to_classifier_finetunning.ipynb`: tuning on synthetic slides
+### `02_3_pca_vector_to_classifier_finetunning.ipynb`: tuning on PCA-reduced vectors
 
 ```mermaid
 flowchart TD
     subgraph IN["Inputs"]
-        FEAT[("FEATURES_DIR/UNI2-h/<br/>one .pt file per slide (from 01)")]
+        PCA[("pca_DIMENSION/UNI2-h/<br/>one .pt file per slide (from 01_2)")]
         LAB[("labels/BRACS.xlsx<br/>class, patient, official set")]
-        MOD[("level_1_mod/UNI2-h/fold_k/<br/>synthetic .pt files (from 01_2)")]
-        LABM[("labels/BRACS_mod.csv<br/>synthetic slides, fold, part, sources")]
+        FULL[("level_1/UNI2-h/<br/>1536-d vectors, Testing slides only")]
         OLD[("classifier/final/<br/>models of 02_1 and 02_2")]
     end
 
     subgraph S3["3. Data"]
         D1["3.1 build_slide_table + load_bags"]
         D2["3.2 relabel_table<br/>Non-cancer / atypia-neoplasia / IC"]
-        D3["3.3 make_cv_folds<br/>patient-grouped, stratified (real slides)"]
-        D4["3.4 load_mod_folds<br/>synthetic slides per fold, sources checked<br/>against the fit and early-stopping slides"]
+        D3["3.3 make_cv_folds<br/>patient-grouped, stratified"]
     end
 
     subgraph S4["4. Bayesian optimisation"]
-        B1["objective_factory + run_study<br/>TPE sampler, one trial = one 5-fold CV<br/>(train and stop on synthetic, score on real held-out)"]
+        B1["objective_factory + run_study<br/>TPE sampler, one trial = one 5-fold CV"]
         B2["trials_table + plot_tuning"]
     end
 
@@ -458,22 +528,19 @@ flowchart TD
         N1["oof_by_repeat + single_vs_ensemble<br/>out-of-fold, no Testing"]
     end
 
-    subgraph S8["8. Testing set (real slides), used once"]
+    subgraph S8["8. Testing set, used once"]
         E1["predict_ensemble<br/>all fold models"]
         E2["class_views + bootstrap_views<br/>plot_final_results"]
-        E3["paired_bootstrap_views<br/>vs the 02_1 and 02_2 models"]
+        E3["paired_bootstrap_views<br/>vs the 1536-d models of 02_1 and 02_2"]
     end
 
-    OUT[("classifier/final/noncancer_noninvasive_invasive_synthetic/<br/>ensemble_date-time.pt")]
+    OUT[("classifier/final/noncancer_noninvasive_invasive_pcaDIMENSION/<br/>ensemble_date-time.pt")]
 
-    FEAT --> D1
+    PCA --> D1
     LAB --> D1
     D1 --> D2
     D2 --> D3
-    D3 --> D4
-    MOD --> D4
-    LABM --> D4
-    D4 --> B1
+    D3 --> B1
     B1 --> B2
     B2 --> C1
     C1 --> C2
@@ -482,12 +549,70 @@ flowchart TD
     E1 --> E2
     E1 --> E3
     OLD --> E3
+    FULL --> E3
     N1 --> OUT
 ```
 
-- **Synthetic slides:** made and saved by notebook 01_2 (`utils/synthetic_slides.py`: `save_synthetic_folds`, `write_mod_labels`); notebook 02_3 only loads them (`load_mod_folds`). For every fold, `N_TOTAL` (1000) slides, equal per class, 20% of them for early stopping, made only from the real fit / early-stopping slides of the fold. Size 4096 or 8192 tiles; at least `K_SLIDES` (12) source slides; no source above `TOP_PERCENTAGE` (20%) of the tiles; tiles drawn with replacement and shuffled. Only the recipes are stored (`outputs/02_3_synthetic/synthetic_recipes.pt`); `SyntheticBags` assembles the embeddings when a batch is built.
-- **Scoring:** the held-out slides of each fold and the Testing slides are real. The search is that of 02_2 without `max_tiles` (the size is fixed); the study (`three_class_synthetic`) is in `outputs/02_3_tuning/study.db`.
-- **Output:** `classifier/final/noncancer_noninvasive_invasive_synthetic/ensemble_<date-time>.pt`; the Testing results are compared with the 02_1 model and the 02_2 ensemble.
+- **Input:** the reduced vectors `<FEATURES_ROOT>/pca_<DIMENSION>/UNI2-h/<slide>.pt` written by notebook 01_2 (the PCA was fitted on Training tiles only; the constant `DIMENSION` is 512 by default and can be 256, 1024, ...). The original vectors (`level_1/`) are read for the Testing slides only, for the comparison.
+- **Search:** that of 02_2 (including the tile cap); the study `three_class_pca<DIMENSION>` is in `outputs/02_3_tuning/study.db` and one study exists per dimension.
+- **Output:** `classifier/final/noncancer_noninvasive_invasive_pca<DIMENSION>/ensemble_<date-time>.pt`; the Testing results are compared with the 02_1 model and the 02_2 ensemble (1536-d) by a paired patient bootstrap.
+
+### `02_4_synthetic_vector_to_classifier_finetunning.ipynb`: tuning on synthetic vectors
+
+```mermaid
+flowchart TD
+    subgraph IN["Inputs"]
+        PCA[("pca_DIMENSION/UNI2-h/<br/>real PCA vectors (01_2)")]
+        SYN[("synthetic/gaussian/pca_DIMENSION/k_K/<br/>labels/BRACS_synthetic.csv (01_3)")]
+        LAB[("labels/BRACS.xlsx<br/>class, patient, official set")]
+        FULL[("level_1/UNI2-h/<br/>1536-d vectors, Testing slides only")]
+        OLD[("classifier/final/<br/>models of 02_1, 02_2, 02_3")]
+    end
+
+    subgraph S3["3. Data"]
+        D1["3.1 build_slide_table + load_bags<br/>real bags: stop, held-out, Testing"]
+        D2["3.2 relabel_table<br/>Non-cancer / atypia-neoplasia / IC"]
+        D3["3.3 make_cv_folds<br/>the folds of 02_3"]
+        D4["3.4 load_synthetic_sets<br/>one set per k"]
+        D5["3.5 validation_mask<br/>score of SCORING"]
+    end
+
+    subgraph S4["4. Bayesian optimisation"]
+        B1["synthetic_objective_factory + run_study<br/>fit on synthetic bags of syn_k,<br/>stop on real stop slides, score on held-out"]
+        B2["trials_table + plot_tuning"]
+    end
+
+    subgraph S5["5-7. Selection, confirmation, ensemble"]
+        C1["select_setting + confirmation<br/>synthetic_cross_validate, 2 repeats"]
+        N1["oof_by_repeat + single_vs_ensemble"]
+    end
+
+    subgraph S8["8. Testing set, used once"]
+        E1["predict_ensemble<br/>real Testing slides"]
+        E2["class_views + bootstrap_views"]
+        E3["summary_across_sets + paired_bootstrap_views<br/>vs 02_3, 02_1 and 02_2"]
+    end
+
+    OUT[("classifier/final/noncancer_noninvasive_invasive_synpcaDIMENSION/<br/>ensemble_date-time.pt")]
+
+    PCA --> D1
+    LAB --> D1
+    D1 --> D2 --> D3
+    SYN --> D4
+    D3 --> D5
+    D3 --> B1
+    D4 --> B1
+    D5 --> B1
+    B1 --> B2 --> C1 --> N1 --> E1 --> E2
+    E1 --> E3
+    OLD --> E3
+    FULL --> E3
+    N1 --> OUT
+```
+
+- **Input:** the real PCA vectors `<FEATURES_ROOT>/pca_<DIMENSION>/UNI2-h/` (early-stopping, held-out and Testing slides), the synthetic bags `<FEATURES_ROOT>/synthetic/gaussian/pca_<DIMENSION>/k_<K>/` with the sheet `labels/BRACS_synthetic.csv` (notebook 01_3), and the models of 02_1, 02_2 and 02_3 for the comparison.
+- **Design:** the folds of 02_3; every fold model is fitted on all synthetic slides of the sampled `syn_k`, stopped on the real early-stopping slides of its fold and scored on the real held-out slides. `SCORING = 'cv'` pools every held-out slide (optimistic: the generator saw all official Training slides); `'validation'` scores only the held-out official Validation slides of patients without Training slides.
+- **Output:** `classifier/final/noncancer_noninvasive_invasive_synpca<DIMENSION>/ensemble_<date-time>.pt`; the study `three_class_syn_pca<DIMENSION>_<SCORING>` is in `outputs/02_4_tuning/study.db`.
 
 ## Repository layout
 
