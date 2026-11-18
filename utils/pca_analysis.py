@@ -742,3 +742,54 @@ def save_pca_embeddings(features_dir: str | Path, out_root: str | Path, model_na
         (out_root / f"pca_{d}" / "metadata.json").write_text(json.dumps(info_json, indent=1, default=str))
 
     return {"saved": saved, "missing": missing, "folders": folders}
+
+
+def fit_fold_pca_embeddings(features_dir: str | Path, out_root: str | Path, model_name: str, folds: list[dict], dims: list[int],
+                            max_per_slide: int, max_fit_tiles: int, seed: int, solver: str = "randomized", batch_size: int = 20000,
+                            whiten: bool = False, overwrite: bool = False, stratify_by_label: bool = False, labels: dict[str, str] | None = None) -> pd.DataFrame:
+    """
+    One PCA per cross-validation fold, fitted on the fold's fit slides only, and the reduced vectors of the fold's slides.
+
+    The held-out and the early-stopping slides of a fold, and the official Testing slides, never enter its PCA (a global PCA
+    has seen them, which leaks into the cross-validation scores). The files of fold k are written to
+    out_root/cv_fold_<k>/pca_<d>/model_name/<slide>.pt by save_pca_embeddings for the slides of fold["table7"] (fit, early stopping,
+    held-out and the official Testing slides), with the 7-class label and the stored sets Training, Validation, HeldOut, Testing.
+    The metadata.json of every folder carries the fold index and its fit / stop / held slide lists.
+
+    * Arguments:
+    features_dir: The folder with the original embeddings (level_1)
+    out_root: The features root that receives the cv_fold_<k> folders (not inside features_dir)
+    model_name: The model subfolder
+    folds: The output of per_fold.cv_folds_for_features (each fold needs fit, stop, held and table7)
+    dims: The PCA dimensions to store
+    max_per_slide: The cap of fit tiles per slide
+    max_fit_tiles: The cap of the fit sample
+    seed: The seed of the sampling and of the PCA
+    solver: "randomized" or "incremental" (fit_pca)
+    batch_size: The batch size of the incremental solver
+    whiten: Whether to whiten (never in this project)
+    overwrite: Allow replacing existing outputs
+    stratify_by_label: As sample_tiles
+    labels: {slide: label} (only used when stratify_by_label)
+
+    Returns a table with one row per fold: fit slides, fit tiles, and the explained variance ratio of the stored dimensions.
+    """
+    from utils.per_fold import fold_definition, fold_root
+
+    labels = labels or {}
+    rows = []
+    for k, fold in enumerate(folds):
+        # STEP 1: Sample the fit slides of this fold only and fit the PCA
+        sample = sample_tiles(features_dir, model_name, fold["fit"], labels, max_per_slide, max_fit_tiles, seed, stratify_by_label)
+        pca, usable = fit_pca(sample["X"], dims, solver, batch_size, seed)
+        usable = [d for d in dims if d in usable]
+
+        # STEP 2: Transform every slide of the fold and save
+        config = {**fold_definition(fold, k), "seed": seed, "solver": solver, "dimensions": usable, "max_tiles_per_slide": max_per_slide,
+                  "max_fit_tiles": max_fit_tiles, "fit_tiles": int(len(sample["X"])), "per_fold": True, "features_dir": str(features_dir),
+                  "explained_variance_at_dims": {int(d): float(pca.explained_variance_ratio_[:d].sum()) for d in usable}}
+        save_pca_embeddings(features_dir, fold_root(out_root, k), model_name, pca, usable, fold["table7"], config, whiten, overwrite)
+        rows.append({"fold": k, "fit slides": len(fold["fit"]), "fit tiles": len(sample["X"]),
+                     **{f"explained variance {d}": float(pca.explained_variance_ratio_[:d].sum()) for d in usable}})
+
+    return pd.DataFrame(rows)

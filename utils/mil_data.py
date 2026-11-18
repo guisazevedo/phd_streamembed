@@ -23,14 +23,14 @@ def load_bags(features_dir: str | Path, model_name: str, table: pd.DataFrame) ->
     Load the CLS embeddings of every labelled slide as one bag of tile vectors per slide.
 
     Slides without a feature file, or without any tile (for example because they lack the pyramid
-    level that was tiled), are dropped and reported. Vectors are kept in float16 to save memory.
+    level that was tiled), are dropped and reported. Vectors are kept in the dtype of the files (float32 for the PCA files).
 
     * Arguments:
     features_dir: The folder that holds one subfolder per model
     model_name: The model subfolder with the per-slide .pt files
     table: The output of dataset_overview.build_slide_table (columns slide, patient, label, set)
 
-    Returns a dict with bags ({slide: float16 tensor [tiles, dim]}), coords ({slide: [tiles, 2]}),
+    Returns a dict with bags ({slide: tensor [tiles, dim], the dtype of the files}), coords ({slide: [tiles, 2]}),
     table (the rows of `table` that have features, reindexed), classes, missing (slide names), dim and
     tile_params (the tiling parameters stored in the files; a list when the files disagree).
     """
@@ -52,7 +52,7 @@ def load_bags(features_dir: str | Path, model_name: str, table: pd.DataFrame) ->
         if len(x) == 0:
             empty.append(slide)
             continue
-        bags[slide] = x.to(torch.float16).clone()
+        bags[slide] = x.clone()
         coords[slide] = data["coordinates"].clone()
         params.append(data.get("tile_params"))
 
@@ -80,6 +80,20 @@ def load_bags(features_dir: str | Path, model_name: str, table: pd.DataFrame) ->
         "bags": bags, "coords": coords, "table": kept, "classes": get_classes(kept), "missing": missing + empty,
         "dim": next(iter(bags.values())).shape[1], "tile_params": tile_params,
     }
+
+
+def bags_to_device(bags: dict[str, torch.Tensor], device: torch.device) -> dict[str, torch.Tensor]:
+    """
+    The bags of load_bags as tensors on `device` (they then stay there, so a batch needs no host-to-device copy of its bags).
+
+    * Arguments:
+    bags: {slide: tensor [tiles, dim]}
+    device: The device to move them to; on the CPU the bags are returned unchanged
+    """
+    if device.type == "cpu":
+        return bags
+
+    return {slide: x.to(device) for slide, x in bags.items()}
 
 
 def fit_scaler(bags: dict[str, torch.Tensor], slides: list[str]) -> dict[str, torch.Tensor]:
@@ -147,22 +161,22 @@ def batch_iterator(
             if tile_dropout > 0:
                 keep = max(1, round(len(x) * (1 - tile_dropout)))
                 if keep < len(x):
-                    x = x[torch.randperm(len(x), generator=generator)[:keep]]
+                    x = x[torch.randperm(len(x), generator=generator)[:keep].to(x.device)]
             if max_tiles is not None and len(x) > max_tiles:
-                x = x[torch.randperm(len(x), generator=generator)[:max_tiles]]
-            tensors.append(x)
+                x = x[torch.randperm(len(x), generator=generator)[:max_tiles].to(x.device)]
+            tensors.append(x.to(device, non_blocking=True))      # only the kept tiles are moved; a no-op for bags that are on the device
 
+        # The batch is padded, standardised and masked on the device
         length = max(len(x) for x in tensors)
-        padded = torch.zeros(len(names), length, tensors[0].shape[1], dtype=torch.float16)
-        mask = torch.zeros(len(names), length, dtype=torch.bool)
-        for i, x in enumerate(tensors):
-            padded[i, : len(x)] = x
-            mask[i, : len(x)] = True
+        x = torch.zeros(len(names), length, tensors[0].shape[1], dtype=torch.float32, device=device)
+        mask = torch.zeros(len(names), length, dtype=torch.bool, device=device)
+        for i, t in enumerate(tensors):
+            x[i, : len(t)] = t
+            mask[i, : len(t)] = True
 
-        x = padded.to(device).float()
         if scaler is not None:
             x = (x - scaler["mean"].to(device)) / scaler["std"].to(device)
-        x = x * mask.to(device).unsqueeze(-1)
+        x = x * mask.unsqueeze(-1)
         y = torch.as_tensor([labels[n] for n in names], device=device)
 
-        yield x, mask.to(device), y, names
+        yield x, mask, y, names

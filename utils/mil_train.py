@@ -191,7 +191,7 @@ def train_model(
 
     labels = _label_map(pd.concat([train_table, val_table]), classes)      # the labels of Testing slides are not even available here
     y_val = np.array([labels[s] for s in val_slides])
-    scaler = fit_scaler(data["bags"], train_slides)
+    scaler = data["bags"].fit_scaler(train_slides) if hasattr(data["bags"], "fit_scaler") else fit_scaler(data["bags"], train_slides)   # fresh synthetic bags: fixed draw
     generator = torch.Generator().manual_seed(seed)
     if not 0.0 <= coarse_weight <= 1.0:
         raise ValueError(f"coarse_weight must be in [0, 1], got {coarse_weight}")
@@ -215,6 +215,8 @@ def train_model(
     needs_labels = getattr(model, "needs_labels", False)
     history, best, best_state, best_epoch, stale = [], None, None, 0, 0
     for epoch in range(1, epochs + 1):
+        if hasattr(data["bags"], "set_epoch"):          # fresh synthetic bags: new draw every epoch
+            data["bags"].set_epoch(epoch)
         model.train()
         losses, instance_losses, coarse_losses = [], [], []
         for x, mask, y, _ in batch_iterator(data["bags"], train_slides, labels, batch_size, device, scaler, max_tiles, True, generator, tile_dropout):
@@ -272,10 +274,13 @@ def predict_ensemble(results: list[dict], data: dict, slides: list[str], device:
     """
     Predict with every model of a multi-seed run and average the probabilities (and attention).
 
+    A result that carries its own `data` (a model trained in its own PCA space, see mil_cv.cross_validate with
+    per-fold feature spaces) predicts from it; the others use `data`.
+
     Returns {"proba": mean probabilities [n, K], "per_seed": list of probabilities, "attention": mean
     attention per slide (or None)}.
     """
-    outputs = [predict(r["model"], data, slides, device, r["scaler"], attention) for r in results]
+    outputs = [predict(r["model"], r.get("data", data), slides, device, r["scaler"], attention) for r in results]
     mean_attention = [np.mean([o["attention"][i] for o in outputs], axis=0) for i in range(len(slides))] if attention else None
 
     return {"proba": np.mean([o["proba"] for o in outputs], axis=0), "per_seed": [o["proba"] for o in outputs], "attention": mean_attention}

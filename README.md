@@ -12,14 +12,14 @@ The work is organised as numbered notebooks. Each one keeps its code thin; the l
 |---|---|---|
 | `00_data_visualization.ipynb` | the data set: labels, audit of the official split, slide properties, pyramid levels, class weights | done |
 | `01_1_wsi_to_vectors.ipynb` | slides to tile embeddings, and inspection of the embeddings | done |
-| `01_2_vectors_to_pca_analysis.ipynb` | PCA of the tile embeddings (explained variance, effective rank, reconstruction, cosine neighbourhood preservation) and the reduced embeddings saved as `pca_<d>/` | done |
+| `01_2_vectors_to_pca_analysis.ipynb` | PCA of the tile embeddings (explained variance, effective rank, reconstruction, cosine neighbourhood preservation) and the reduced embeddings saved as `pca_<d>/`; with `PER_FOLD` one PCA per cross-validation fold on its fit slides only (`cv_fold_<k>/pca_<d>/`) | done |
 | `01_3_wsi_to_mod_vectors.ipynb` | synthetic slides from the saved real tile embeddings, saved per cross-validation fold as `.pt` files (`level_1_mod/`) with a label file `labels/BRACS_mod.csv` | done |
-| `01_3_pca_to_synthetic_vectors.ipynb` | synthetic WSI bags from the PCA-reduced vectors of 01_2: class-specific MiniBatchKMeans, blended real Training slides as composition templates (`N_TEMPLATES_PER_WSI`), per-cluster Gaussian sampling; saved under `synthetic/<method>/pca_<D>/k_<K>/` with the label sheet `labels/BRACS_synthetic.csv` | done |
+| `01_3_pca_to_synthetic_vectors.ipynb` | synthetic WSI bags from the PCA-reduced vectors of 01_2: class-specific (or shared) MiniBatchKMeans, blended real Training slides as composition templates (`N_TEMPLATES_PER_WSI`), per-cluster Gaussian sampling by the independent-tile `gaussian` method or by `hier_lowrank` (one offset per cluster and bag from the between-slide variance of the real cluster means, low-rank covariance), with diagnostics of the between-slide variance and of a real-vs-synthetic classifier; optional `PER_FOLD` (one generator per fold), `MIN_CLUSTER_SLIDES` (drop clusters seen in few slides, with a support table) and `COMPOSITION_MODE = 'lesion_share'` (ADH / DCIS bags from a lesion-share model); saved under `synthetic/<method>/pca_<D>/k_<K>/` with the label sheet `labels/BRACS_synthetic.csv` | done |
 | `02_0_vectors_to_classifier_selector.ipynb` | PyTorch classifier (multiple-instance learning) on the saved vectors, with a full set of metrics on the official Testing set | done |
 | `02_1_vector_to_classifier_experimentation.ipynb` | one CLAM-MB per label set (Benign/Atypical/Malignant, Non-cancer/Cancer, Non-cancer/DCIS/IC) with confusion matrix, ROC/AUROC, accuracy, F1, sensitivity, specificity and precision on the Testing set | done |
 | `02_2_vector_to_classifier_finetunning.ipynb` | Bayesian optimisation (optuna) of the direct 3-class CLAM-MB (Non-cancer / ADH+DCIS / IC) by patient-grouped cross-validation, an ensemble of the fold models, evaluated once on the Testing set; the 4-class version (with ADH as its own class) is kept in `02_2_vector_to_classifier_finetunning_4class.ipynb` | done |
 | `02_3_pca_vector_to_classifier_finetunning.ipynb` | the tuning of 02_2 on the PCA-reduced vectors of 01_2 (`DIMENSION` components, 512 by default), scored on the same folds and evaluated once on the Testing set, and compared with the 1536-d models of 02_1 and 02_2 | done |
-| `02_4_synthetic_vector_to_classifier_finetunning.ipynb` | the tuning of 02_3 with the classifier fitted on the synthetic bags of 01_3 (number of clusters searched), stopped on real slides, scored by CV or on clean Validation slides (`SCORING`), evaluated once on the Testing set and compared with the models of 02_3, 02_2 and 02_1 | done |
+| `02_4_synthetic_vector_to_classifier_finetunning.ipynb` | the tuning of 02_3 with the classifier fitted on the synthetic bags of 01_3 (`hier_lowrank` by default; number of clusters, dropout, `k_sample` and tile cap searched, lr / weight decay / coarse weight fixed from 02_3), stopped on real slides (optionally on fresh bags drawn in every epoch, `FRESH_BAGS`), scored by CV (default, optimistic) or on clean Validation slides (`SCORING`), with `PER_FOLD` every fold uses its own PCA space and synthetic set (leak-free CV), evaluated once on the Testing set and compared with the models of 02_3, 02_2 and 02_1 | done |
 | `03_reidentification_risk_assessment.ipynb` | re-identification risk assessment | planned (empty) |
 
 ## The data set
@@ -277,7 +277,13 @@ flowchart TD
         W1["save_pca_embeddings"]
     end
 
+    subgraph S12["12. PER_FOLD"]
+        F1["cv_folds_for_features<br/>the folds of 02_3 / 02_4"]
+        F2["fit_fold_pca_embeddings<br/>one PCA per fold, fit slides only"]
+    end
+
     OUT[("pca_d/UNI2-h/<br/>slide .pt, pca_model.pt, metadata.json")]
+    FOUT[("cv_fold_k/pca_d/UNI2-h/<br/>slide .pt, pca_model.pt, metadata.json with the fold")]
 
     FEAT --> D1
     LAB --> D1
@@ -292,29 +298,38 @@ flowchart TD
     P5 --> C1
     P1 --> W1
     W1 --> OUT
+    FEAT --> F1
+    LAB --> F1
+    F1 --> F2
+    F2 --> FOUT
 ```
 
 - **Input:** the per-slide `.pt` files of notebook 01_1 and `labels/BRACS.xlsx`.
-- **Output:** `<PCA_OUTPUT_DIR>/pca_<d>/UNI2-h/<slide>.pt` (`cls_features` `[tiles, d]`, `coordinates`, `model_encoder`, `tile_params`, `pca`, `slide`, `label`, `patient`, `set`; tile order and coordinates as in the original), `pca_<d>/pca_model.pt` (mean, components, explained variance) and `pca_<d>/metadata.json`. The PCA is fitted on Training tiles only; Testing slides are only transformed. No figure is exported.
+- **Output:** `<PCA_OUTPUT_DIR>/pca_<d>/UNI2-h/<slide>.pt` (`cls_features` `[tiles, d]`, `coordinates`, `model_encoder`, `tile_params`, `pca`, `slide`, `label`, `patient`, `set`; tile order and coordinates as in the original), `pca_<d>/pca_model.pt` (mean, components, explained variance) and `pca_<d>/metadata.json`. The PCA is fitted on Training tiles only; Testing slides are only transformed. With `PER_FOLD = True` (section 12) one PCA per fold of 02_3 / 02_4 is fitted on the fit slides of that fold only (not on its early-stopping or held-out slides, nor on Testing) and written to `<PCA_OUTPUT_DIR>/cv_fold_<k>/pca_<d>/UNI2-h/` (stored sets `Training`, `Validation`, `HeldOut`, `Testing`; `metadata.json` records the fold and its `fit_slides` / `stop_slides` / `held_slides`). No figure is exported.
 
 ### `01_3_pca_to_synthetic_vectors.ipynb`: synthetic WSI bags from the PCA vectors
 
 ```mermaid
 flowchart TD
-    PCA[("pca_D/UNI2-h/<br/>one .pt file per slide (from 01_2)")] --> SEL["3. load_training_slides<br/>Training slides only, validated"]
+    PCA[("pca_D/UNI2-h/<br/>one .pt file per slide (from 01_2)<br/>PER_FOLD: cv_fold_K/pca_D/")] --> SEL["3. build_sources + select_training<br/>Training slides only, validated<br/>PER_FOLD: fit slides of one fold"]
     LAB[("labels/BRACS.xlsx")] --> SEL
-    SEL --> KM["4. sample_class_tiles + fit_class_clusters<br/>MiniBatchKMeans per class and k"]
-    KM --> STAT["5. collect_class_statistics<br/>composition templates + Gaussian sums"]
-    STAT --> GAUSS["6. GaussianGenerator.fit"]
-    STAT --> GEN["7. generate_configuration<br/>blend of several templates (Dirichlet)"]
+    SEL --> KM["4. sample_class_tiles + fit_class_clusters or fit_shared_clusters<br/>MiniBatchKMeans per class and k (or one shared codebook)"]
+    KM --> STAT["5. collect_class_statistics<br/>composition templates, Gaussian sums, per-slide cluster means"]
+    STAT --> SUP["5.1 cluster_support_table<br/>slides per cluster (read-only)"]
+    STAT --> PRUNE["5.2 prune_state<br/>MIN_CLUSTER_SLIDES: drop sparse clusters,<br/>statistics collected again"]
+    PRUNE --> GAUSS["6. GaussianGenerator.fit or HierarchicalGenerator.fit<br/>within / between-slide variance, low-rank factors"]
+    PRUNE --> LES["6.1 lesion_enrichment + fit_lesion_models<br/>COMPOSITION_MODE lesion_share: lesion clusters,<br/>Beta lesion share, lognormal size"]
+    PRUNE --> GEN["7. generate_configuration<br/>blend of several templates (Dirichlet), or lesion-share bags for ADH / DCIS;<br/>one offset per cluster and bag"]
     GAUSS --> GEN
-    GEN --> DIAG["8. diagnostics (tables, plots)"]
-    GEN --> OUT[("synthetic/method/pca_D/k_K/<br/>SYN_*.pt, metadata.json, cluster_models.pt, labels.csv")]
-    GEN --> SHEET[("labels/BRACS_synthetic.csv")]
+    LES --> GEN
+    GEN --> DIAG["8. diagnostics (tables, plots, between-slide variance, real-vs-synthetic AUC,<br/>8.8 lesion share and bag-level AUC)"]
+    GEN --> OUT[("synthetic/method+tag/pca_D/k_K/<br/>SYN_*.pt, metadata.json, cluster_models.pt, labels.csv<br/>PER_FOLD: cv_fold_K/synthetic/")]
+    GEN --> SHEET[("labels/BRACS_synthetic.csv<br/>PER_FOLD: BRACS_synthetic_cv_fold_K.csv")]
+    GEN --> FOLDS["10.1 run_source for the other folds<br/>PER_FOLD"]
 ```
 
 - **Input:** the reduced vectors `<PCA_INPUT_DIR>/pca_<D>/UNI2-h/<slide>.pt` of 01_2 and the official split of `labels/BRACS.xlsx`. Only Training slides are used for clusters, Gaussians and templates.
-- **Output:** `<SYNTHETIC_OUTPUT_DIR>/<method>/pca_<D>/k_<K>/SYN_<method>_pca<D>_k<K>_<class>_<i>.pt` (the keys of the PCA files; `set` is `Synthetic`, no real identifiers), `metadata.json`, `cluster_models.pt`, `labels.csv`, and the CSV `labels/BRACS_synthetic.csv` (columns of `BRACS.xlsx` plus `method`, `pca_dim`, `k`, `n_tiles`, `n_templates`, `max_template_weight`). Only the Gaussian method is implemented; `GeneratorBase` is the extension point.
+- **Output:** `<SYNTHETIC_OUTPUT_DIR>/<method>/pca_<D>/k_<K>/SYN_<method>_pca<D>_k<K>_<class>_<i>.pt` (the keys of the PCA files; `set` is `Synthetic`, no real identifiers), `metadata.json` (with the generator options), `cluster_models.pt` (centres, generator parameters and, for fresh bags in 02_4, the `composition` templates of each class without slide ids), `labels.csv`, and the CSV `labels/BRACS_synthetic.csv` (columns of `BRACS.xlsx` plus `method`, `pca_dim`, `k`, `n_tiles`, `n_templates`, `max_template_weight`). Methods: `gaussian` (independent tiles) and `hier_lowrank` (per-bag offsets of the cluster means, `diag` / `full` / `lowrank` covariance, `OFFSET_SCALE` 0 to 1, `COVARIANCE_SHRINKAGE`, optional `SHARED_CODEBOOK`); `GeneratorBase` (with the per-bag hook `start_bag`) is the extension point. Each method writes to its own folder (the generation method plus `OUTPUT_TAG`, plus `_lesion` in the lesion-share mode), so existing sets are not touched. The three new options default to the earlier behaviour: `PER_FOLD` (one pipeline run per CV fold from the fit slides recorded by 01_2, output in `cv_fold_<k>/synthetic/`), `MIN_CLUSTER_SLIDES` (removed clusters recorded in `metadata.json`) and `COMPOSITION_MODE` (`lesion_share` needs `SHARED_CODEBOOK`; adds `lesion_share.csv`, the lesion rule and clusters in `metadata.json` and the lesion model in `cluster_models.pt`; not available with `FRESH_BAGS`). The notebook constants `SHARED_CODEBOOK = True`, `K_VALUES = [100, 150, 250]`, `MIN_SLIDES = 10`, `COVARIANCE_SHRINKAGE = 0.2` are starting values, not validated; the pipeline is in `utils/synthetic_pipeline.py`.
 
 ### `01_3_wsi_to_mod_vectors.ipynb`: synthetic slides to vectors
 
@@ -562,8 +577,8 @@ flowchart TD
 ```mermaid
 flowchart TD
     subgraph IN["Inputs"]
-        PCA[("pca_DIMENSION/UNI2-h/<br/>real PCA vectors (01_2)")]
-        SYN[("synthetic/gaussian/pca_DIMENSION/k_K/<br/>labels/BRACS_synthetic.csv (01_3)")]
+        PCA[("pca_DIMENSION/UNI2-h/<br/>real PCA vectors (01_2)<br/>PER_FOLD: cv_fold_K/pca_DIMENSION/")]
+        SYN[("synthetic/METHOD/pca_DIMENSION/k_K/<br/>labels/BRACS_synthetic.csv (01_3)<br/>PER_FOLD: cv_fold_K/synthetic/")]
         LAB[("labels/BRACS.xlsx<br/>class, patient, official set")]
         FULL[("level_1/UNI2-h/<br/>1536-d vectors, Testing slides only")]
         OLD[("classifier/final/<br/>models of 02_1, 02_2, 02_3")]
@@ -573,12 +588,13 @@ flowchart TD
         D1["3.1 build_slide_table + load_bags<br/>real bags: stop, held-out, Testing"]
         D2["3.2 relabel_table<br/>Non-cancer / atypia-neoplasia / IC"]
         D3["3.3 make_cv_folds<br/>the folds of 02_3"]
-        D4["3.4 load_synthetic_sets<br/>one set per k"]
+        D3b["3.3b check_fold_metadata + load_fold_data<br/>PER_FOLD: bags of every fold space"]
+        D4["3.4 load_synthetic_sets (PER_FOLD: _per_fold)<br/>one set per k; FRESH_BAGS: generators +<br/>templates of cluster_models.pt"]
         D5["3.5 validation_mask<br/>score of SCORING"]
     end
 
     subgraph S4["4. Bayesian optimisation"]
-        B1["synthetic_objective_factory + run_study<br/>fit on synthetic bags of syn_k,<br/>stop on real stop slides, score on held-out"]
+        B1["synthetic_objective_factory + run_study<br/>fit on synthetic bags of syn_k (saved, or<br/>FreshSyntheticBags: new draw every epoch),<br/>stop on real stop slides, score on held-out"]
         B2["trials_table + plot_tuning"]
     end
 
@@ -599,6 +615,8 @@ flowchart TD
     LAB --> D1
     D1 --> D2 --> D3
     SYN --> D4
+    D3 --> D3b
+    D3b --> B1
     D3 --> D5
     D3 --> B1
     D4 --> B1
@@ -610,9 +628,10 @@ flowchart TD
     N1 --> OUT
 ```
 
-- **Input:** the real PCA vectors `<FEATURES_ROOT>/pca_<DIMENSION>/UNI2-h/` (early-stopping, held-out and Testing slides), the synthetic bags `<FEATURES_ROOT>/synthetic/gaussian/pca_<DIMENSION>/k_<K>/` with the sheet `labels/BRACS_synthetic.csv` (notebook 01_3), and the models of 02_1, 02_2 and 02_3 for the comparison.
-- **Design:** the folds of 02_3; every fold model is fitted on all synthetic slides of the sampled `syn_k`, stopped on the real early-stopping slides of its fold and scored on the real held-out slides. `SCORING = 'cv'` pools every held-out slide (optimistic: the generator saw all official Training slides); `'validation'` scores only the held-out official Validation slides of patients without Training slides.
-- **Output:** `classifier/final/noncancer_noninvasive_invasive_synpca<DIMENSION>/ensemble_<date-time>.pt`; the study `three_class_syn_pca<DIMENSION>_<SCORING>` is in `outputs/02_4_tuning/study.db`.
+- **Input:** the real PCA vectors `<FEATURES_ROOT>/pca_<DIMENSION>/UNI2-h/` (early-stopping, held-out and Testing slides), the synthetic bags `<FEATURES_ROOT>/synthetic/<SYNTHETIC_METHOD>/pca_<DIMENSION>/k_<K>/` (`hier_lowrank` by default) with the sheet `labels/BRACS_synthetic.csv` (notebook 01_3), and the models of 02_1, 02_2 and 02_3 for the comparison.
+- **Design:** the folds of 02_3; with `FRESH_BAGS = True` the bags are drawn anew in every epoch (`FreshSyntheticBags`, seeded by seed, epoch and slide; `train_model` calls `set_epoch` and takes the scaler from one fixed draw), which needs the `composition` key of a re-run 01_3; every fold model is fitted on all synthetic slides of the sampled `syn_k`, stopped on the real early-stopping slides of its fold and scored on the real held-out slides. `SCORING = 'cv'` (default) pools every held-out slide (optimistic: the generator saw all official Training slides, so it is comparable only with other synthetic sets, not with 02_3); `'validation'` scores only the held-out official Validation slides of patients without Training slides. The search space is restricted in this notebook only: `dropout`, `k_sample` in {16, 32}, `max_tiles` in {8192, None} and `syn_k`; lr, weight decay and the coarse-loss weight are fixed at the 02_3 values (`constants_from_02_3`, fallback `DEFAULT_CONSTANTS`).
+- **Per-fold mode (`PER_FOLD = True`, default `False`):** removes the leak of the global PCA and generator. The PCA (01_2) and the synthetic set (01_3) of every fold are fitted on the fit slides of that fold only; each fold is fitted, stopped and scored in its own PCA space (`training_folds` with one synthetic set and one real data dict per fold, `eval_data` and `dim` in the fold dict; `cross_validate` stores the fold's data in each run, so `predict_ensemble`, `oof_by_repeat` and the saved ensemble use the right space) and `SCORING` must be `'cv'`, which then scores every held-out slide without that leak. The folds are checked against those recorded by 01_2. `LAZY_FOLDS = True` keeps one fold's bags in memory at a time. The comparison with the global-PCA models of 02_3 is not exactly paired, because the fold models do not share one PCA basis.
+- **Output:** `classifier/final/noncancer_noninvasive_invasive_synpca<DIMENSION>/ensemble_<date-time>.pt`; the study `three_class_syn_pca<DIMENSION>_<SCORING>` (suffix `_fresh` with `FRESH_BAGS`, then `_perfold` with `PER_FOLD`; the ensemble folder gets the same suffixes) is in `outputs/02_4_tuning/study.db`. With `PER_FOLD` each model in the file records its `fold` and `features_dir`.
 
 ## Repository layout
 
@@ -629,7 +648,9 @@ utils/                        code, by role:
     pipeline          dataset, clean_empty, transformer_basic, transformer_per_model, dataloader,
                       load_model, device, generate_features
     classifier        mil_data, mil_models, mil_train, classification_metrics, plot_classification,
-                      mil_cv, mil_tuning, final_classifier, synthetic_slides
+                      mil_cv, mil_tuning, final_classifier, synthetic_slides, synthetic_training, per_fold
+    synthetic bags    synthetic_gaussian, synthetic_pipeline (stages of 01_3, also per fold), synthetic_lesion
+                      (lesion-share composition), pca_analysis (01_2, incl. the PCA per fold)
     data set          labels, slide_stats, dataset_overview, class_weights, plot_pyramid
     embeddings        plot_wsi, inspect_features, cls_data, cls_overview, cluster_quality, class_analysis
     figures           figure_captions (the caption under each panel)

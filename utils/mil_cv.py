@@ -91,9 +91,10 @@ def fold_data(data: dict, fold: dict) -> dict:
     A copy of the mil_data.load_bags dict whose table is the fold table (the bags are shared, not copied).
 
     A fold that has the optional keys train_table and bags (see synthetic_slides.make_synthetic_folds) trains on
-    those instead; fold["table"] and the held-out slides stay the real ones.
+    those instead; fold["table"] and the held-out slides stay the real ones. A fold with a `dim` key (the per-fold PCA
+    spaces of 02_4 with PER_FOLD) overrides the dimension of the vectors.
     """
-    return {**data, "table": fold.get("train_table", fold["table"]), "bags": fold.get("bags", data["bags"])}
+    return {**data, "table": fold.get("train_table", fold["table"]), "bags": fold.get("bags", data["bags"]), "dim": fold.get("dim", data["dim"])}
 
 
 def cross_validate(
@@ -126,6 +127,8 @@ def cross_validate(
     Returns a dict with runs (the train_model results, fold-major within each repeat), slides, y (class index),
     patients, proba (mean held-out probabilities over repeats, one row per pool slide), fold_of (fold index of
     every slide) and per_fold (DataFrame with the held-out macro-F1 and balanced accuracy of every fold and repeat).
+    A fold with the optional key eval_data (a load_bags dict of that fold's own feature space) is predicted from it,
+    and its run carries it as run["data"].
     """
 
     classes = data["classes"]
@@ -142,7 +145,11 @@ def cross_validate(
             fold_dataset = fold_data(data, fold)
             run = train_model(model_name, fold_dataset, training_class_weights(fold_dataset, weighting), device, seed + 1000 * repeat + k, verbose=False, **train_kwargs)
             held = fold["held"]
-            p = predict(run["model"], data, held, device, run["scaler"])["proba"]
+            eval_data = fold.get("eval_data", data)       # per-fold PCA space (PER_FOLD): the held-out bags of this fold's own space
+            if "eval_data" in fold:
+                run["data"] = eval_data                    # predict_ensemble then predicts Testing in the space of this model
+                run["fold"], run["features_dir"] = k, str(eval_data.get("features_dir", ""))
+            p = predict(run["model"], eval_data, held, device, run["scaler"])["proba"]
             rows_held = [position[s] for s in held]
             proba[rows_held] += p / repeats
             fold_of[rows_held] = k

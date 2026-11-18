@@ -71,6 +71,13 @@ def setting_kwargs(setting: dict, fixed: dict) -> dict:
     return {**fixed, **{k: setting[k] for k in PARAMETERS if k in setting}, "batch_size": fixed.get("batch_size") or batch_size_for(setting.get("max_tiles", fixed.get("max_tiles")))}
 
 
+def _clipped(proba: np.ndarray, eps: float = 1e-7) -> np.ndarray:
+    """The probabilities clipped to [eps, 1] and renormalised, so every row sums to 1 (log_loss warns about rows that do not)."""
+    clipped = np.clip(proba, eps, 1)
+
+    return clipped / clipped.sum(1, keepdims=True)
+
+
 def score_cv(cv: dict, classes: list[str], n_folds: int | None = None) -> dict:
     """
     Out-of-fold measures of a cross-validation (see mil_cv.cross_validate), pooled over all slides.
@@ -88,7 +95,7 @@ def score_cv(cv: dict, classes: list[str], n_folds: int | None = None) -> dict:
     std = float(np.std(per_fold, ddof=1)) if len(per_fold) > 1 else float("nan")
 
     return {"macro_f1": float(f1_score(truth, pred, labels=labels, average="macro", zero_division=0)),
-            "log_loss": float(log_loss(truth, np.clip(proba, 1e-7, 1), labels=labels)),
+            "log_loss": float(log_loss(truth, _clipped(proba), labels=labels)),
             **{f"recall_{c}": float(r) for c, r in zip(classes, recalls)}, **{f"f1_{c}": float(f) for c, f in zip(classes, f1s)},
             "fold_std": std, "fold_se": std / np.sqrt(n_folds)}
 
@@ -212,7 +219,8 @@ def oof_by_repeat(cv: dict, data: dict, folds: list[dict], device: torch.device)
     The out-of-fold probabilities of every repeat of a cross-validation, one array [n_slides, K] per repeat.
 
     cross_validate averages the repeats; this predicts the held-out slides of every fold again with the run of
-    each repeat, to compare a single model with the repeat-averaged ensemble.
+    each repeat, to compare a single model with the repeat-averaged ensemble. A run with its own `data` (per-fold PCA
+    space) predicts from it.
     """
     position = {s: i for i, s in enumerate(cv["slides"])}
     n_folds = len(folds)
@@ -221,7 +229,7 @@ def oof_by_repeat(cv: dict, data: dict, folds: list[dict], device: torch.device)
     for i, run in enumerate(cv["runs"]):
         repeat, fold = divmod(i, n_folds)
         held = folds[fold]["held"]
-        result[repeat][[position[s] for s in held]] = predict(run["model"], data, held, device, run["scaler"])["proba"]
+        result[repeat][[position[s] for s in held]] = predict(run["model"], run.get("data", data), held, device, run["scaler"])["proba"]
 
     return result
 
@@ -233,7 +241,7 @@ def single_vs_ensemble(cv: dict, per_repeat: list[np.ndarray], classes: list[str
     rows["ensemble (mean of repeats)"] = np.mean(per_repeat, axis=0)
 
     return pd.DataFrame({name: {"macro_f1": f1_score(truth, p.argmax(1), labels=labels, average="macro", zero_division=0),
-                                "log_loss": log_loss(truth, np.clip(p / p.sum(1, keepdims=True), 1e-7, 1), labels=labels),
+                                "log_loss": log_loss(truth, _clipped(p / p.sum(1, keepdims=True)), labels=labels),
                                 **{f"recall_{c}": r for c, r in zip(classes, recall_score(truth, p.argmax(1), labels=labels, average=None, zero_division=0))}}
                          for name, p in rows.items()}).T
 
@@ -242,12 +250,14 @@ def save_ensemble(runs: list[dict], directory, config: dict | None = None) -> Pa
     """
     Save every model of an ensemble (weights, scaler, classes, settings and the early-stopping result of each) to one file,
     <directory>/ensemble_<date>_<time>.pt; load_ensemble gives the models back in the form predict_ensemble takes.
+    A run with the keys fold and features_dir (per-fold PCA spaces) keeps them, so the feature space of each model is known.
     """
     folder = Path(directory)
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"ensemble_{datetime.now():%Y-%m-%d_%H-%M-%S}.pt"
     models = [{"model_name": r["model_name"], "model_kwargs": r["model_kwargs"], "in_dim": r["in_dim"], "classes": r["classes"], "state_dict": r["model"].state_dict(),
-               "scaler": r["scaler"], "seed": r["seed"], "best_epoch": r["best_epoch"], "validation": r["best"]} for r in runs]
+               "scaler": r["scaler"], "seed": r["seed"], "best_epoch": r["best_epoch"], "validation": r["best"],
+               **({"fold": r["fold"]} if "fold" in r else {}), **({"features_dir": r["features_dir"]} if "features_dir" in r else {})} for r in runs]
     torch.save({"models": models, "config": json.loads(json.dumps(config or {}, default=str))}, path)
 
     return path
@@ -266,7 +276,7 @@ def load_ensemble(path, device: torch.device | None = None) -> dict:
     for entry in checkpoint["models"]:
         model = build_model(entry["model_name"], entry["in_dim"], len(entry["classes"]), **entry["model_kwargs"])
         model.load_state_dict(entry["state_dict"])
-        runs.append({**{k: entry[k] for k in ("scaler", "classes", "seed", "best_epoch", "model_name")}, "best": entry["validation"], "model": model.to(device).eval()})
+        runs.append({**{k: entry[k] for k in ("scaler", "classes", "seed", "best_epoch", "model_name")}, **{k: entry[k] for k in ("fold", "features_dir") if k in entry}, "best": entry["validation"], "model": model.to(device).eval()})
 
     return {"runs": runs, "classes": checkpoint["models"][0]["classes"], "config": checkpoint["config"]}
 
